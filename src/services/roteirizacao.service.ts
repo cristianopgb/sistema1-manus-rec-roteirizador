@@ -166,7 +166,7 @@ export const roteirizacaoService = {
   async listarRodadas(filialId?: string): Promise<RodadaRoteirizacao[]> {
     let query = supabase
       .from('rodadas_roteirizacao')
-      .select('*, filiais:filial_id(nome), usuarios_perfil:usuario_id(nome)')
+      .select('*, filiais:filial_id(nome)')
       .order('created_at', { ascending: false })
       .limit(100)
 
@@ -178,7 +178,7 @@ export const roteirizacaoService = {
     return (data || []).map((r) => ({
       ...r,
       filial_nome: (r.filiais as { nome: string } | null)?.nome,
-      usuario_nome: (r.usuarios_perfil as { nome: string } | null)?.nome,
+      usuario_nome: r.usuario_nome,
     })) as RodadaRoteirizacao[]
   },
 
@@ -188,14 +188,14 @@ export const roteirizacaoService = {
   async buscarRodada(id: string): Promise<RodadaRoteirizacao> {
     const { data, error } = await supabase
       .from('rodadas_roteirizacao')
-      .select('*, filiais:filial_id(nome), usuarios_perfil:usuario_id(nome)')
+      .select('*, filiais:filial_id(nome)')
       .eq('id', id)
       .single()
     if (error) throw error
     return {
       ...data,
       filial_nome: (data.filiais as { nome: string } | null)?.nome,
-      usuario_nome: (data.usuarios_perfil as { nome: string } | null)?.nome,
+      usuario_nome: data.usuario_nome,
     } as RodadaRoteirizacao
   },
 

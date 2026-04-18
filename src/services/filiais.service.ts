@@ -1,6 +1,13 @@
 import { supabase } from '@/lib/supabase'
 import { Filial } from '@/types'
 
+type FilialRow = Omit<Filial, 'ativo'> & { ativa?: boolean; ativo?: boolean }
+
+const mapFilialRow = (row: FilialRow): Filial => ({
+  ...row,
+  ativo: row.ativo ?? row.ativa ?? true,
+})
+
 export const filiaisService = {
   async listar(): Promise<Filial[]> {
     const { data, error } = await supabase
@@ -8,17 +15,17 @@ export const filiaisService = {
       .select('*')
       .order('nome')
     if (error) throw error
-    return data as Filial[]
+    return (data || []).map((f) => mapFilialRow(f as FilialRow))
   },
 
   async buscarAtivas(): Promise<Filial[]> {
     const { data, error } = await supabase
       .from('filiais')
       .select('*')
-      .eq('ativo', true)
+      .eq('ativa', true)
       .order('nome')
     if (error) throw error
-    return data as Filial[]
+    return (data || []).map((f) => mapFilialRow(f as FilialRow))
   },
 
   async buscarPorId(id: string): Promise<Filial> {
@@ -28,34 +35,38 @@ export const filiaisService = {
       .eq('id', id)
       .single()
     if (error) throw error
-    return data as Filial
+    return mapFilialRow(data as FilialRow)
   },
 
   async criar(filial: Omit<Filial, 'id' | 'created_at'>): Promise<Filial> {
+    const { ativo, ...payload } = filial
     const { data, error } = await supabase
       .from('filiais')
-      .insert(filial)
+      .insert({ ...payload, ativa: ativo })
       .select()
       .single()
     if (error) throw error
-    return data as Filial
+    return mapFilialRow(data as FilialRow)
   },
 
   async atualizar(id: string, filial: Partial<Filial>): Promise<Filial> {
+    const { ativo, ...payload } = filial
+    const patch = typeof ativo === 'boolean' ? { ...payload, ativa: ativo } : payload
+
     const { data, error } = await supabase
       .from('filiais')
-      .update(filial)
+      .update(patch)
       .eq('id', id)
       .select()
       .single()
     if (error) throw error
-    return data as Filial
+    return mapFilialRow(data as FilialRow)
   },
 
   async alternarAtivo(id: string, ativo: boolean): Promise<void> {
     const { error } = await supabase
       .from('filiais')
-      .update({ ativo })
+      .update({ ativa: ativo })
       .eq('id', id)
     if (error) throw error
   },
