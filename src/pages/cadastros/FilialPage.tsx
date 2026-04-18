@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Building2, Plus, Pencil, Power, Loader2, X, Check } from 'lucide-react'
 import { filiaisService } from '@/services/filiais.service'
+import { getErrorMessage } from '@/lib/async'
 import { Filial } from '@/types'
 import toast from 'react-hot-toast'
 
@@ -35,8 +36,9 @@ export function FilialPage() {
     try {
       const data = await filiaisService.listar()
       setFiliais(data)
-    } catch {
-      toast.error('Erro ao carregar filiais')
+    } catch (error) {
+      console.error('Erro ao carregar filiais:', error)
+      toast.error(getErrorMessage(error, 'Erro ao carregar filiais'))
     } finally {
       setLoading(false)
     }
@@ -92,8 +94,9 @@ export function FilialPage() {
       }
       setShowModal(false)
       carregar()
-    } catch (err) {
-      toast.error('Erro ao salvar filial')
+    } catch (error) {
+      console.error('Erro ao salvar filial:', error)
+      toast.error(getErrorMessage(error, 'Erro ao salvar filial'))
     } finally {
       setSalvando(false)
     }
@@ -104,8 +107,9 @@ export function FilialPage() {
       await filiaisService.alternarAtivo(filial.id, !filial.ativo)
       toast.success(`Filial ${filial.ativo ? 'desativada' : 'ativada'}`)
       carregar()
-    } catch {
-      toast.error('Erro ao alterar status')
+    } catch (error) {
+      console.error('Erro ao alterar status da filial:', error)
+      toast.error(getErrorMessage(error, 'Erro ao alterar status'))
     }
   }
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Users, Plus, Pencil, Power, Loader2, X, Check } from 'lucide-react'
 import { usuariosService } from '@/services/usuarios.service'
 import { filiaisService } from '@/services/filiais.service'
+import { getErrorMessage } from '@/lib/async'
 import { UserProfile, Filial } from '@/types'
 import toast from 'react-hot-toast'
 
@@ -35,8 +36,9 @@ export function UsuarioPage() {
       ])
       setUsuarios(u)
       setFiliais(f)
-    } catch {
-      toast.error('Erro ao carregar usuários')
+    } catch (error) {
+      console.error('Erro ao carregar usuários:', error)
+      toast.error(getErrorMessage(error, 'Erro ao carregar usuários'))
     } finally {
       setLoading(false)
     }
@@ -93,8 +95,9 @@ export function UsuarioPage() {
       }
       setShowModal(false)
       carregar()
-    } catch {
-      toast.error('Erro ao salvar usuário')
+    } catch (error) {
+      console.error('Erro ao salvar usuário:', error)
+      toast.error(getErrorMessage(error, 'Erro ao salvar usuário'))
     } finally {
       setSalvando(false)
     }
@@ -105,8 +108,9 @@ export function UsuarioPage() {
       await usuariosService.alternarAtivo(u.id, !u.ativo)
       toast.success(`Usuário ${u.ativo ? 'desativado' : 'ativado'}`)
       carregar()
-    } catch {
-      toast.error('Erro ao alterar status')
+    } catch (error) {
+      console.error('Erro ao alterar status do usuário:', error)
+      toast.error(getErrorMessage(error, 'Erro ao alterar status'))
     }
   }
 

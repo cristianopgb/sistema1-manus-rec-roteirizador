@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/async'
 import { Filial } from '@/types'
 
 type FilialRow = Omit<Filial, 'ativo'> & { ativa?: boolean; ativo?: boolean }
@@ -10,20 +11,26 @@ const mapFilialRow = (row: FilialRow): Filial => ({
 
 export const filiaisService = {
   async listar(): Promise<Filial[]> {
-    const { data, error } = await supabase
-      .from('filiais')
-      .select('*')
-      .order('nome')
+    const { data, error } = await withTimeout(
+      supabase
+        .from('filiais')
+        .select('*')
+        .order('nome'),
+      'Carregamento de filiais'
+    )
     if (error) throw error
     return (data || []).map((f) => mapFilialRow(f as FilialRow))
   },
 
   async buscarAtivas(): Promise<Filial[]> {
-    const { data, error } = await supabase
-      .from('filiais')
-      .select('*')
-      .eq('ativa', true)
-      .order('nome')
+    const { data, error } = await withTimeout(
+      supabase
+        .from('filiais')
+        .select('*')
+        .eq('ativa', true)
+        .order('nome'),
+      'Carregamento de filiais ativas'
+    )
     if (error) throw error
     return (data || []).map((f) => mapFilialRow(f as FilialRow))
   },
@@ -40,11 +47,14 @@ export const filiaisService = {
 
   async criar(filial: Omit<Filial, 'id' | 'created_at'>): Promise<Filial> {
     const { ativo, ...payload } = filial
-    const { data, error } = await supabase
-      .from('filiais')
-      .insert({ ...payload, ativa: ativo })
-      .select()
-      .single()
+    const { data, error } = await withTimeout(
+      supabase
+        .from('filiais')
+        .insert({ ...payload, ativa: ativo })
+        .select()
+        .single(),
+      'Cadastro de filial'
+    )
     if (error) throw error
     return mapFilialRow(data as FilialRow)
   },
@@ -53,12 +63,15 @@ export const filiaisService = {
     const { ativo, ...payload } = filial
     const patch = typeof ativo === 'boolean' ? { ...payload, ativa: ativo } : payload
 
-    const { data, error } = await supabase
-      .from('filiais')
-      .update(patch)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await withTimeout(
+      supabase
+        .from('filiais')
+        .update(patch)
+        .eq('id', id)
+        .select()
+        .single(),
+      'Atualização de filial'
+    )
     if (error) throw error
     return mapFilialRow(data as FilialRow)
   },
