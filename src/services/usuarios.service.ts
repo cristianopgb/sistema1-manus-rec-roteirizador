@@ -1,12 +1,16 @@
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/async'
 import { UserProfile } from '@/types'
 
 export const usuariosService = {
   async listar(): Promise<UserProfile[]> {
-    const { data, error } = await supabase
-      .from('usuarios_perfil')
-      .select('*, filiais:filial_id(nome)')
-      .order('nome')
+    const { data, error } = await withTimeout(
+      supabase
+        .from('usuarios_perfil')
+        .select('*, filiais:filial_id(nome)')
+        .order('nome'),
+      'Carregamento de usuários'
+    )
     if (error) throw error
     return (data || []).map((u) => ({
       ...u,
@@ -23,29 +27,35 @@ export const usuariosService = {
   }): Promise<{ user: UserProfile | null; error: Error | null }> {
     // Criar usuário via Supabase Auth Admin (requer service role key no backend)
     // Por ora, inserir direto na tabela de perfis (o auth.users deve ser criado via Supabase Dashboard)
-    const { data, error } = await supabase
-      .from('usuarios_perfil')
-      .insert({
-        email: usuario.email,
-        nome: usuario.nome,
-        perfil: usuario.perfil,
-        filial_id: usuario.filial_id,
-        ativo: true,
-      })
-      .select()
-      .single()
+    const { data, error } = await withTimeout(
+      supabase
+        .from('usuarios_perfil')
+        .insert({
+          email: usuario.email,
+          nome: usuario.nome,
+          perfil: usuario.perfil,
+          filial_id: usuario.filial_id,
+          ativo: true,
+        })
+        .select()
+        .single(),
+      'Cadastro de usuário'
+    )
 
     if (error) return { user: null, error: error as unknown as Error }
     return { user: data as UserProfile, error: null }
   },
 
   async atualizar(id: string, dados: Partial<UserProfile>): Promise<UserProfile> {
-    const { data, error } = await supabase
-      .from('usuarios_perfil')
-      .update(dados)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await withTimeout(
+      supabase
+        .from('usuarios_perfil')
+        .update(dados)
+        .eq('id', id)
+        .select()
+        .single(),
+      'Atualização de usuário'
+    )
     if (error) throw error
     return data as UserProfile
   },

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/async'
 import { Veiculo } from '@/types'
 
 export const veiculosService = {
@@ -11,7 +12,7 @@ export const veiculosService = {
 
     if (filialId) query = query.eq('filial_id', filialId)
 
-    const { data, error } = await query
+    const { data, error } = await withTimeout(query, 'Carregamento de veículos')
     if (error) throw error
 
     return (data || []).map((v) => ({
@@ -29,7 +30,7 @@ export const veiculosService = {
 
     if (filialId) query = query.eq('filial_id', filialId)
 
-    const { data, error } = await query
+    const { data, error } = await withTimeout(query, 'Carregamento de veículos ativos')
     if (error) throw error
 
     return (data || []).map((v) => ({
@@ -39,11 +40,14 @@ export const veiculosService = {
   },
 
   async criar(veiculo: Omit<Veiculo, 'id' | 'created_at' | 'filial_nome'>): Promise<Veiculo> {
-    const { data, error } = await supabase
-      .from('veiculos')
-      .insert(veiculo)
-      .select()
-      .single()
+    const { data, error } = await withTimeout(
+      supabase
+        .from('veiculos')
+        .insert(veiculo)
+        .select()
+        .single(),
+      'Cadastro de veículo'
+    )
     if (error) throw error
     return data as Veiculo
   },
@@ -51,12 +55,15 @@ export const veiculosService = {
   async atualizar(id: string, veiculo: Partial<Veiculo>): Promise<Veiculo> {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { filial_nome: _, ...payload } = veiculo
-    const { data, error } = await supabase
-      .from('veiculos')
-      .update(payload)
-      .eq('id', id)
-      .select()
-      .single()
+    const { data, error } = await withTimeout(
+      supabase
+        .from('veiculos')
+        .update(payload)
+        .eq('id', id)
+        .select()
+        .single(),
+      'Atualização de veículo'
+    )
     if (error) throw error
     return data as Veiculo
   },

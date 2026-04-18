@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Truck, Plus, Pencil, Power, Loader2, X, Check } from 'lucide-react'
 import { veiculosService } from '@/services/veiculos.service'
 import { filiaisService } from '@/services/filiais.service'
+import { getErrorMessage } from '@/lib/async'
 import { Veiculo, Filial } from '@/types'
 import toast from 'react-hot-toast'
 
@@ -59,8 +60,9 @@ export function VeiculoPage() {
       ])
       setVeiculos(v)
       setFiliais(f)
-    } catch {
-      toast.error('Erro ao carregar veículos')
+    } catch (error) {
+      console.error('Erro ao carregar veículos:', error)
+      toast.error(getErrorMessage(error, 'Erro ao carregar veículos'))
     } finally {
       setLoading(false)
     }
@@ -129,8 +131,9 @@ export function VeiculoPage() {
       }
       setShowModal(false)
       carregar()
-    } catch {
-      toast.error('Erro ao salvar veículo')
+    } catch (error) {
+      console.error('Erro ao salvar veículo:', error)
+      toast.error(getErrorMessage(error, 'Erro ao salvar veículo'))
     } finally {
       setSalvando(false)
     }
@@ -141,8 +144,9 @@ export function VeiculoPage() {
       await veiculosService.alternarAtivo(v.id, !v.ativo)
       toast.success(`Veículo ${v.ativo ? 'desativado' : 'ativado'}`)
       carregar()
-    } catch {
-      toast.error('Erro ao alterar status')
+    } catch (error) {
+      console.error('Erro ao alterar status do veículo:', error)
+      toast.error(getErrorMessage(error, 'Erro ao alterar status'))
     }
   }
 
