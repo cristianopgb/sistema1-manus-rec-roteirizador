@@ -19,12 +19,12 @@ export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
 export type Database = {
   public: {
     Tables: {
-      perfis_usuarios: {
+      usuarios_perfil: {
         Row: {
           id: string
           email: string
           nome: string
-          role: 'master' | 'roteirizador'
+          perfil: 'master' | 'roteirizador'
           filial_id: string | null
           ativo: boolean
           created_at: string

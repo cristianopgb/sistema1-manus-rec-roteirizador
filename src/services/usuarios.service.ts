@@ -4,7 +4,7 @@ import { UserProfile } from '@/types'
 export const usuariosService = {
   async listar(): Promise<UserProfile[]> {
     const { data, error } = await supabase
-      .from('perfis_usuarios')
+      .from('usuarios_perfil')
       .select('*, filiais:filial_id(nome)')
       .order('nome')
     if (error) throw error
@@ -17,18 +17,18 @@ export const usuariosService = {
   async criar(usuario: {
     email: string
     nome: string
-    role: 'master' | 'roteirizador'
+    perfil: 'master' | 'roteirizador'
     filial_id: string | null
     password: string
   }): Promise<{ user: UserProfile | null; error: Error | null }> {
     // Criar usuário via Supabase Auth Admin (requer service role key no backend)
     // Por ora, inserir direto na tabela de perfis (o auth.users deve ser criado via Supabase Dashboard)
     const { data, error } = await supabase
-      .from('perfis_usuarios')
+      .from('usuarios_perfil')
       .insert({
         email: usuario.email,
         nome: usuario.nome,
-        role: usuario.role,
+        perfil: usuario.perfil,
         filial_id: usuario.filial_id,
         ativo: true,
       })
@@ -41,7 +41,7 @@ export const usuariosService = {
 
   async atualizar(id: string, dados: Partial<UserProfile>): Promise<UserProfile> {
     const { data, error } = await supabase
-      .from('perfis_usuarios')
+      .from('usuarios_perfil')
       .update(dados)
       .eq('id', id)
       .select()
@@ -52,7 +52,7 @@ export const usuariosService = {
 
   async alternarAtivo(id: string, ativo: boolean): Promise<void> {
     const { error } = await supabase
-      .from('perfis_usuarios')
+      .from('usuarios_perfil')
       .update({ ativo })
       .eq('id', id)
     if (error) throw error

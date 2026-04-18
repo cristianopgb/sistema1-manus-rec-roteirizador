@@ -45,7 +45,7 @@ function ProtectedRoute({ children, masterOnly = false }: { children: React.Reac
     )
   }
 
-  if (masterOnly && profile.role !== 'master') {
+  if (masterOnly && profile.perfil !== 'master') {
     return <Navigate to="/dashboard" replace />
   }
 

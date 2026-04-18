@@ -9,7 +9,7 @@ export interface UserProfile {
   id: string
   email: string
   nome: string
-  role: UserRole
+  perfil: UserRole
   filial_id: string | null
   filial_nome?: string
   ativo: boolean

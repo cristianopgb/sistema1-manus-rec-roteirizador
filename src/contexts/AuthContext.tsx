@@ -43,8 +43,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
     try {
       const { data, error } = await supabase
-        .from('perfis_usuarios')
-        .select('id, email, nome, role, filial_id, ativo, created_at')
+        .from('usuarios_perfil')
+        .select('id, email, nome, perfil, filial_id, ativo, created_at')
         .eq('id', userId)
         .single()
 
@@ -130,8 +130,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setFilialAtiva(null)
   }
 
-  const isMaster = profile?.role === 'master'
-  const isRoteirizador = profile?.role === 'roteirizador'
+  const isMaster = profile?.perfil === 'master'
+  const isRoteirizador = profile?.perfil === 'roteirizador'
   const filialId = profile?.filial_id ?? null
 
   return (

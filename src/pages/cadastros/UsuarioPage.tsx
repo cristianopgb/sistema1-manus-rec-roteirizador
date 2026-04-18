@@ -8,13 +8,13 @@ import toast from 'react-hot-toast'
 interface FormUsuario {
   email: string
   nome: string
-  role: 'master' | 'roteirizador'
+  perfil: 'master' | 'roteirizador'
   filial_id: string
   password: string
 }
 
 const FORM_VAZIO: FormUsuario = {
-  email: '', nome: '', role: 'roteirizador', filial_id: '', password: '',
+  email: '', nome: '', perfil: 'roteirizador', filial_id: '', password: '',
 }
 
 export function UsuarioPage() {
@@ -55,7 +55,7 @@ export function UsuarioPage() {
     setForm({
       email: u.email,
       nome: u.nome,
-      role: u.role,
+      perfil: u.perfil,
       filial_id: u.filial_id || '',
       password: '',
     })
@@ -67,7 +67,7 @@ export function UsuarioPage() {
       toast.error('Preencha e-mail e nome')
       return
     }
-    if (form.role === 'roteirizador' && !form.filial_id) {
+    if (form.perfil === 'roteirizador' && !form.filial_id) {
       toast.error('Roteirizador precisa de uma filial')
       return
     }
@@ -76,16 +76,16 @@ export function UsuarioPage() {
       if (editando) {
         await usuariosService.atualizar(editando.id, {
           nome: form.nome,
-          role: form.role,
-          filial_id: form.role === 'master' ? null : form.filial_id || null,
+          perfil: form.perfil,
+          filial_id: form.perfil === 'master' ? null : form.filial_id || null,
         })
         toast.success('Usuário atualizado')
       } else {
         const { error } = await usuariosService.criar({
           email: form.email,
           nome: form.nome,
-          role: form.role,
-          filial_id: form.role === 'master' ? null : form.filial_id || null,
+          perfil: form.perfil,
+          filial_id: form.perfil === 'master' ? null : form.filial_id || null,
           password: form.password,
         })
         if (error) throw error
@@ -151,8 +151,8 @@ export function UsuarioPage() {
                     <td className="font-medium">{u.nome}</td>
                     <td className="text-gray-600">{u.email}</td>
                     <td>
-                      <span className={u.role === 'master' ? 'badge-blue' : 'badge-green'}>
-                        {u.role === 'master' ? 'Master' : 'Roteirizador'}
+                      <span className={u.perfil === 'master' ? 'badge-blue' : 'badge-green'}>
+                        {u.perfil === 'master' ? 'Master' : 'Roteirizador'}
                       </span>
                     </td>
                     <td className="text-gray-600">{u.filial_nome || '—'}</td>
@@ -198,13 +198,13 @@ export function UsuarioPage() {
               </div>
               <div>
                 <label className="label">Perfil *</label>
-                <select className="input" value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value as 'master' | 'roteirizador', filial_id: '' })}>
+                <select className="input" value={form.perfil}
+                  onChange={(e) => setForm({ ...form, perfil: e.target.value as 'master' | 'roteirizador', filial_id: '' })}>
                   <option value="roteirizador">Roteirizador</option>
                   <option value="master">Master</option>
                 </select>
               </div>
-              {form.role === 'roteirizador' && (
+              {form.perfil === 'roteirizador' && (
                 <div>
                   <label className="label">Filial *</label>
                   <select className="input" value={form.filial_id}
