@@ -4,6 +4,32 @@ import { Filial } from '@/types'
 
 type FilialRow = Omit<Filial, 'ativo'> & { ativa?: boolean; ativo?: boolean }
 
+type FilialPersistPayload = {
+  codigo?: string
+  nome?: string
+  cidade?: string
+  uf?: string
+  latitude?: number
+  longitude?: number
+  ativa?: boolean
+}
+
+const toPersistPayload = (
+  filial: Partial<Filial> & { ativo?: boolean }
+): FilialPersistPayload => {
+  const payload: FilialPersistPayload = {}
+
+  if (typeof filial.codigo === 'string') payload.codigo = filial.codigo
+  if (typeof filial.nome === 'string') payload.nome = filial.nome
+  if (typeof filial.cidade === 'string') payload.cidade = filial.cidade
+  if (typeof filial.uf === 'string') payload.uf = filial.uf
+  if (typeof filial.latitude === 'number') payload.latitude = filial.latitude
+  if (typeof filial.longitude === 'number') payload.longitude = filial.longitude
+  if (typeof filial.ativo === 'boolean') payload.ativa = filial.ativo
+
+  return payload
+}
+
 const mapFilialRow = (row: FilialRow): Filial => ({
   ...row,
   ativo: row.ativo ?? row.ativa ?? true,
@@ -46,11 +72,11 @@ export const filiaisService = {
   },
 
   async criar(filial: Omit<Filial, 'id' | 'created_at'>): Promise<Filial> {
-    const { ativo, ...payload } = filial
+    const payload = toPersistPayload(filial)
     const { data, error } = await withTimeout(
       supabase
         .from('filiais')
-        .insert({ ...payload, ativa: ativo })
+        .insert(payload)
         .select()
         .single(),
       'Cadastro de filial'
@@ -60,8 +86,7 @@ export const filiaisService = {
   },
 
   async atualizar(id: string, filial: Partial<Filial>): Promise<Filial> {
-    const { ativo, ...payload } = filial
-    const patch = typeof ativo === 'boolean' ? { ...payload, ativa: ativo } : payload
+    const patch = toPersistPayload(filial)
 
     const { data, error } = await withTimeout(
       supabase
