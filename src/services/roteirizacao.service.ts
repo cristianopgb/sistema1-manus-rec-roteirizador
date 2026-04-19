@@ -6,7 +6,7 @@ import {
   Filial, Veiculo
 } from '@/types'
 
-const MOTOR_URL = import.meta.env.VITE_MOTOR_URL || 'http://localhost:8000'
+const MOTOR_URL = import.meta.env.VITE_MOTOR_2_URL || 'http://localhost:8000'
 
 export interface CarteiraFiltros {
   upload_id?: string
