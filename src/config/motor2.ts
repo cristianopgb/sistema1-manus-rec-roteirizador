@@ -8,6 +8,7 @@ const isProductionOrPreview = (): boolean =>
   import.meta.env.PROD || import.meta.env.MODE === 'preview'
 
 const normalizeBaseUrl = (value: string): string => value.trim().replace(/\/+$/, '')
+const isDevelopment = (): boolean => import.meta.env.DEV
 
 export const getMotor2BaseUrl = (): string => {
   const envValue = typeof import.meta.env.VITE_MOTOR_2_URL === 'string'
@@ -45,5 +46,16 @@ export const getMotor2BaseUrl = (): string => {
 
 export const buildMotor2Url = (path: string): string => {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
-  return `${getMotor2BaseUrl()}${normalizedPath}`
+  const baseUrl = getMotor2BaseUrl()
+  const fullUrl = `${baseUrl}${normalizedPath}`
+
+  if (isDevelopment()) {
+    console.debug('[Motor2] endpoint resolvido', {
+      baseUrl,
+      path: normalizedPath,
+      fullUrl,
+    })
+  }
+
+  return fullUrl
 }
