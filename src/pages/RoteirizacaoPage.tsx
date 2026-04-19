@@ -68,7 +68,11 @@ export function RoteirizacaoPage() {
   }, [isMaster, filialAtiva, filiaisMaster, filialSelecionadaMaster])
 
   useEffect(() => {
-    setFiltros((prev) => ({ ...prev, filial_id: filialOperacionalId }))
+    setFiltros((prev) => (
+      prev.filial_id === filialOperacionalId
+        ? prev
+        : { ...prev, filial_id: filialOperacionalId }
+    ))
   }, [filialOperacionalId])
 
   useEffect(() => {
@@ -101,15 +105,6 @@ export function RoteirizacaoPage() {
     carregarFiliaisMaster()
   }, [isMaster])
 
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault()
-      const file = e.dataTransfer.files[0]
-      if (file) handleArquivo(file)
-    },
-    [filialOperacionalId, user?.id]
-  )
-
   const handleArquivo = async (file: File) => {
     if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
       toast.error('Formato inválido. Use .xlsx, .xls ou .csv')
@@ -129,6 +124,17 @@ export function RoteirizacaoPage() {
     await processar(file, user.id, filialOperacionalId)
     setEtapa('preview')
   }
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      const file = e.dataTransfer.files[0]
+      if (file) {
+        void handleArquivo(file)
+      }
+    },
+    [handleArquivo]
+  )
 
   const confirmarPreview = () => {
     if (upload.totalLinhas === 0 || !upload.uploadId) {
@@ -212,7 +218,7 @@ export function RoteirizacaoPage() {
     )
   }
 
-  const estadoAuthBloqueante = profileLoading || filialLoading
+  const estadoAuthBloqueante = (profileLoading || filialLoading) && !profileError && !filialError && !filialOperacional
 
   if (estadoAuthBloqueante) {
     return (

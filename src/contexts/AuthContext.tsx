@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { withTimeout, getErrorMessage } from '@/lib/async'
@@ -8,6 +8,13 @@ const PROFILE_TIMEOUT_MS = 30_000
 const FILIAL_TIMEOUT_MS = 20_000
 const PROFILE_RETRY_ATTEMPTS = 2
 const PROFILE_RETRY_DELAY_MS = 600
+type AuthChangeEvent =
+  | 'INITIAL_SESSION'
+  | 'SIGNED_IN'
+  | 'SIGNED_OUT'
+  | 'TOKEN_REFRESHED'
+  | 'USER_UPDATED'
+  | 'PASSWORD_RECOVERY'
 
 interface AuthContextType {
   user: User | null
@@ -46,6 +53,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profileError, setProfileError] = useState<string | null>(null)
   const [filialLoading, setFilialLoading] = useState(false)
   const [filialError, setFilialError] = useState<string | null>(null)
+  const userRef = useRef<User | null>(null)
+  const profileRef = useRef<UserProfile | null>(null)
+
+  useEffect(() => {
+    userRef.current = user
+  }, [user])
+
+  useEffect(() => {
+    profileRef.current = profile
+  }, [profile])
 
   const fetchFilialById = useCallback(async (filialId: string): Promise<Filial | null> => {
     try {
@@ -114,7 +131,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return null
   }, [])
 
-  const loadFilialFromProfile = useCallback(async (profileData: UserProfile | null) => {
+  const loadFilialFromProfile = useCallback(async (profileData: UserProfile | null, options?: { showLoading?: boolean }) => {
+    const showLoading = options?.showLoading ?? true
+
     if (!profileData) {
       setFilialAtiva(null)
       setFilialError(null)
@@ -131,38 +150,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return
     }
 
-    setFilialLoading(true)
+    if (showLoading) {
+      setFilialLoading(true)
+    }
     setFilialError(null)
 
     const filial = await fetchFilialById(profileData.filial_id)
     if (!filial) {
       setFilialAtiva(null)
       setFilialError('Não foi possível carregar a filial do perfil.')
-      setFilialLoading(false)
+      if (showLoading) {
+        setFilialLoading(false)
+      }
       return
     }
 
     setFilialAtiva(filial)
-    setFilialLoading(false)
+    if (showLoading) {
+      setFilialLoading(false)
+    }
   }, [fetchFilialById])
 
-  const loadProfileAndFilial = useCallback(async (currentUser: User) => {
-    setProfileLoading(true)
+  const loadProfileAndFilial = useCallback(async (
+    currentUser: User,
+    options?: { showLoading?: boolean; preserveDataOnFailure?: boolean }
+  ) => {
+    const showLoading = options?.showLoading ?? true
+    const preserveDataOnFailure = options?.preserveDataOnFailure ?? false
+
+    if (showLoading) {
+      setProfileLoading(true)
+    }
     setProfileError(null)
 
     const profileData = await fetchProfileByUserId(currentUser.id)
-    setProfile(profileData)
+    if (profileData) {
+      setProfile(profileData)
+    }
 
     if (!profileData) {
       setProfileError('Não foi possível carregar o perfil. Tente novamente.')
-      setFilialAtiva(null)
-      setFilialError(null)
-      setProfileLoading(false)
+      if (!preserveDataOnFailure) {
+        setProfile(null)
+        setFilialAtiva(null)
+        setFilialError(null)
+      }
+      if (showLoading) {
+        setProfileLoading(false)
+      }
       return
     }
 
-    await loadFilialFromProfile(profileData)
-    setProfileLoading(false)
+    await loadFilialFromProfile(profileData, { showLoading })
+    if (showLoading) {
+      setProfileLoading(false)
+    }
   }, [fetchProfileByUserId, loadFilialFromProfile])
 
   const refreshProfile = useCallback(async () => {
@@ -200,7 +242,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAuthLoading(false)
 
         if (initialSession?.user) {
-          await loadProfileAndFilial(initialSession.user)
+          await loadProfileAndFilial(initialSession.user, { showLoading: true })
         } else {
           setProfile(null)
           setFilialAtiva(null)
@@ -215,22 +257,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, nextSession) => {
+      async (event, nextSession) => {
         if (!mounted) return
+
+        const authEvent = event as AuthChangeEvent
+        const prevUserId = userRef.current?.id ?? null
+        const nextUserId = nextSession?.user?.id ?? null
+        const userChanged = prevUserId !== nextUserId
 
         setSession(nextSession)
         setUser(nextSession?.user ?? null)
         setAuthLoading(false)
 
-        if (nextSession?.user) {
-          await loadProfileAndFilial(nextSession.user)
-        } else {
+        if (!nextSession?.user) {
           setProfile(null)
           setFilialAtiva(null)
           setProfileError(null)
           setFilialError(null)
           setProfileLoading(false)
           setFilialLoading(false)
+          return
+        }
+
+        if (authEvent === 'SIGNED_IN' || authEvent === 'USER_UPDATED' || userChanged) {
+          await loadProfileAndFilial(nextSession.user, { showLoading: true })
+          return
+        }
+
+        if (authEvent === 'TOKEN_REFRESHED' || authEvent === 'INITIAL_SESSION' || authEvent === 'PASSWORD_RECOVERY') {
+          if (!profileRef.current || userChanged) {
+            await loadProfileAndFilial(nextSession.user, {
+              showLoading: false,
+              preserveDataOnFailure: true,
+            })
+          }
         }
       }
     )
