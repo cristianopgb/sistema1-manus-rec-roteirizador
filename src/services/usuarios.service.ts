@@ -1,21 +1,37 @@
 import { supabase } from '@/lib/supabase'
-import { withTimeout } from '@/lib/async'
+import { withTimeout, getErrorMessage } from '@/lib/async'
 import { UserProfile } from '@/types'
+
+const USUARIOS_TIMEOUT_MS = 20_000
 
 export const usuariosService = {
   async listar(): Promise<UserProfile[]> {
-    const { data, error } = await withTimeout(
-      supabase
-        .from('usuarios_perfil')
-        .select('*, filiais:filial_id(nome)')
-        .order('nome'),
-      'Carregamento de usuários'
-    )
-    if (error) throw error
-    return (data || []).map((u) => ({
-      ...u,
-      filial_nome: (u.filiais as { nome: string } | null)?.nome,
-    })) as UserProfile[]
+    try {
+      const { data, error } = await withTimeout(
+        supabase
+          .from('usuarios_perfil')
+          .select('*, filiais:filial_id(nome)')
+          .order('nome'),
+        USUARIOS_TIMEOUT_MS,
+        'Carregamento de usuários'
+      )
+
+      if (error) {
+        console.error('[usuarios.service:listar] Supabase retornou erro', error)
+        throw error
+      }
+
+      return (data || []).map((u) => ({
+        ...u,
+        filial_nome: (u.filiais as { nome: string } | null)?.nome,
+      })) as UserProfile[]
+    } catch (error) {
+      console.error('[usuarios.service:listar] Falha ao carregar usuários', {
+        message: getErrorMessage(error, 'Erro ao carregar usuários'),
+        error,
+      })
+      throw error
+    }
   },
 
   async criar(usuario: {
@@ -25,8 +41,6 @@ export const usuariosService = {
     filial_id: string | null
     password: string
   }): Promise<{ user: UserProfile | null; error: Error | null }> {
-    // Criar usuário via Supabase Auth Admin (requer service role key no backend)
-    // Por ora, inserir direto na tabela de perfis (o auth.users deve ser criado via Supabase Dashboard)
     const { data, error } = await withTimeout(
       supabase
         .from('usuarios_perfil')
@@ -42,7 +56,11 @@ export const usuariosService = {
       'Cadastro de usuário'
     )
 
-    if (error) return { user: null, error: error as unknown as Error }
+    if (error) {
+      console.error('[usuarios.service:criar] Falha ao criar usuário', { email: usuario.email, error })
+      return { user: null, error: error as unknown as Error }
+    }
+
     return { user: data as UserProfile, error: null }
   },
 
@@ -56,7 +74,12 @@ export const usuariosService = {
         .single(),
       'Atualização de usuário'
     )
-    if (error) throw error
+
+    if (error) {
+      console.error('[usuarios.service:atualizar] Falha ao atualizar usuário', { id, error })
+      throw error
+    }
+
     return data as UserProfile
   },
 
@@ -65,6 +88,10 @@ export const usuariosService = {
       .from('usuarios_perfil')
       .update({ ativo })
       .eq('id', id)
-    if (error) throw error
+
+    if (error) {
+      console.error('[usuarios.service:alternarAtivo] Falha ao alterar status', { id, ativo, error })
+      throw error
+    }
   },
 }
