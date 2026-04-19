@@ -57,12 +57,17 @@ export function RoteirizacaoPage() {
       toast.error('Formato inválido. Use .xlsx, .xls ou .csv')
       return
     }
-    await processar(file)
+    if (!user?.id || !filialAtiva?.id) {
+      toast.error('Usuário ou filial não identificados para importar carteira')
+      return
+    }
+
+    await processar(file, user.id, filialAtiva.id)
     setEtapa('preview')
   }
 
   const confirmarPreview = () => {
-    if (upload.linhas === 0) {
+    if (upload.totalLinhas === 0 || !upload.uploadId) {
       toast.error('Arquivo sem dados')
       return
     }
@@ -76,6 +81,10 @@ export function RoteirizacaoPage() {
     }
     if (!filtros.data_base) {
       toast.error('Informe a data base da roteirização')
+      return
+    }
+    if (!upload.uploadId) {
+      toast.error('Upload não encontrado. Reimporte a carteira.')
       return
     }
 
@@ -100,7 +109,7 @@ export function RoteirizacaoPage() {
       const resultado = await roteirizacaoService.roteirizar(
         filialAtiva,
         veiculos,
-        upload.carteira,
+        upload.uploadId,
         filtros,
         user!.id
       )
@@ -204,17 +213,17 @@ export function RoteirizacaoPage() {
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="card p-4 text-center">
             <FileSpreadsheet size={24} className="mx-auto text-brand-600 mb-2" />
-            <div className="text-2xl font-bold text-gray-900">{upload.linhas}</div>
+            <div className="text-2xl font-bold text-gray-900">{upload.totalLinhas}</div>
             <div className="text-sm text-gray-500">Linhas carregadas</div>
           </div>
           <div className="card p-4 text-center">
             <Package size={24} className="mx-auto text-brand-600 mb-2" />
-            <div className="text-2xl font-bold text-gray-900">{upload.colunas.length}</div>
+            <div className="text-2xl font-bold text-gray-900">{upload.totalColunas}</div>
             <div className="text-sm text-gray-500">Colunas detectadas</div>
           </div>
           <div className="card p-4 text-center">
             <CheckCircle size={24} className="mx-auto text-green-600 mb-2" />
-            <div className="text-lg font-bold text-gray-900 truncate">{upload.arquivo?.name}</div>
+            <div className="text-lg font-bold text-gray-900 truncate">{upload.nomeArquivo || upload.arquivo?.name}</div>
             <div className="text-sm text-gray-500">Arquivo</div>
           </div>
         </div>
@@ -223,27 +232,27 @@ export function RoteirizacaoPage() {
         <div className="card mb-6">
           <div className="card-header">
             <h3>Primeiras 5 linhas</h3>
-            <span className="text-sm text-gray-500">Mostrando amostra dos dados</span>
+            <span className="text-sm text-gray-500">Linha de cabeçalho detectada: {upload.linhaCabecalhoDetectada ?? "—"}</span>
           </div>
           <div className="table-container">
             <table className="table text-xs">
               <thead>
                 <tr>
-                  {upload.colunas.slice(0, 12).map((col) => (
+                  {upload.colunasDetectadas.slice(0, 12).map((col) => (
                     <th key={col} className="whitespace-nowrap">{col}</th>
                   ))}
-                  {upload.colunas.length > 12 && <th>+{upload.colunas.length - 12} cols</th>}
+                  {upload.colunasDetectadas.length > 12 && <th>+{upload.colunasDetectadas.length - 12} cols</th>}
                 </tr>
               </thead>
               <tbody>
                 {upload.preview.map((row, i) => (
                   <tr key={i}>
-                    {upload.colunas.slice(0, 12).map((col) => (
+                    {upload.colunasDetectadas.slice(0, 12).map((col) => (
                       <td key={col} className="max-w-[120px] truncate">
                         {String(row[col] ?? '—')}
                       </td>
                     ))}
-                    {upload.colunas.length > 12 && <td className="text-gray-400">...</td>}
+                    {upload.colunasDetectadas.length > 12 && <td className="text-gray-400">...</td>}
                   </tr>
                 ))}
               </tbody>
@@ -268,7 +277,7 @@ export function RoteirizacaoPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1>Configurar Roteirização</h1>
-            <p className="text-gray-500 text-sm">{upload.linhas} cargas · {filialAtiva?.nome}</p>
+            <p className="text-gray-500 text-sm">{upload.totalLinhas} cargas · {filialAtiva?.nome}</p>
           </div>
           <button className="btn-ghost" onClick={() => setEtapa('preview')}>
             Voltar

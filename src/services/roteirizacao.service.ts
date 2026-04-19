@@ -8,7 +8,58 @@ import {
 
 const MOTOR_URL = import.meta.env.VITE_MOTOR_URL || 'http://localhost:8000'
 
+export interface CarteiraFiltros {
+  upload_id?: string
+  tomad?: string
+  destin?: string
+  cidade?: string
+  uf?: string
+  mesoregiao?: string
+  sub_regiao?: string
+  status_validacao?: string
+}
+
+const aplicarFiltrosCarteira = (query: any, filtros?: CarteiraFiltros) => {
+  let filtered = query.eq('status_validacao', filtros?.status_validacao || 'valida')
+
+  if (filtros?.tomad) filtered = filtered.eq('tomad', filtros.tomad)
+  if (filtros?.destin) filtered = filtered.eq('destin', filtros.destin)
+  if (filtros?.cidade) filtered = filtered.eq('cidade', filtros.cidade)
+  if (filtros?.uf) filtered = filtered.eq('uf', filtros.uf)
+  if (filtros?.mesoregiao) filtered = filtered.eq('mesoregiao', filtros.mesoregiao)
+  if (filtros?.sub_regiao) filtered = filtered.eq('sub_regiao', filtros.sub_regiao)
+
+  return filtered
+}
+
 export const roteirizacaoService = {
+  async buscarCarteiraPorUploadId(uploadId: string, filtros?: Omit<CarteiraFiltros, 'upload_id'>): Promise<CarteiraCarga[]> {
+    const query = supabase
+      .from('carteira_itens')
+      .select('*')
+      .eq('upload_id', uploadId)
+      .order('linha_numero', { ascending: true })
+
+    const { data, error } = await aplicarFiltrosCarteira(query, filtros)
+    if (error) throw error
+
+    return (data || []).map((item: any) => {
+      const { id, upload_id, status_validacao, erro_validacao, created_at, dados_originais_json, ...rest } = item
+      return ({
+      ...rest,
+      _carteira_item_id: id,
+      _upload_id: upload_id,
+      _status_validacao: status_validacao,
+      _erro_validacao: erro_validacao,
+      _created_at: created_at,
+      _dados_originais: dados_originais_json,
+      })
+    }) as CarteiraCarga[]
+  },
+
+  async filtrarCarteiraItens(uploadId: string, filtros?: Omit<CarteiraFiltros, 'upload_id'>): Promise<CarteiraCarga[]> {
+    return this.buscarCarteiraPorUploadId(uploadId, filtros)
+  },
 
   /**
    * Dispara a roteirização: monta o payload, chama o motor, calcula frete ANTT e salva a rodada
@@ -16,11 +67,17 @@ export const roteirizacaoService = {
   async roteirizar(
     filial: Filial,
     veiculos: Veiculo[],
-    carteira: CarteiraCarga[],
+    uploadId: string,
     filtros: FiltrosRoteirizacao,
-    usuarioId: string
+    usuarioId: string,
+    filtrosCarteira?: Omit<CarteiraFiltros, 'upload_id'>
   ): Promise<{ rodada: RodadaRoteirizacao; manifestos: ManifestoComFrete[] }> {
     const inicio = Date.now()
+    const carteira = await this.buscarCarteiraPorUploadId(uploadId, filtrosCarteira)
+
+    if (!carteira.length) {
+      throw new Error('Nenhum item válido encontrado para este upload.')
+    }
 
     // 1. Montar payload para o motor
     const payload: PayloadMotor = {
@@ -63,7 +120,7 @@ export const roteirizacaoService = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(180_000), // 3 minutos
+        signal: AbortSignal.timeout(180_000),
       })
 
       if (!response.ok) {
@@ -84,11 +141,9 @@ export const roteirizacaoService = {
     const tabelaAntt = await anttService.listar()
     const manifestosComFrete: ManifestoComFrete[] = await Promise.all(
       resposta.manifestos.map(async (manifesto) => {
-        // Determinar tipo de carga (padrão: 5 = Carga Geral)
         const tipoCargaId = 5
         const numEixos = manifesto.num_eixos || 2
 
-        // Buscar coeficiente na tabela ANTT
         const coef = tabelaAntt.find(
           (t) => t.tipo_carga_id === tipoCargaId && t.num_eixos === numEixos
         )
@@ -120,6 +175,7 @@ export const roteirizacaoService = {
       .insert({
         filial_id: filial.id,
         usuario_id: usuarioId,
+        upload_id: uploadId,
         status: resposta.status,
         tipo_roteirizacao: filtros.tipo_roteirizacao,
         total_cargas_entrada: resposta.resumo.total_cargas_entrada,
@@ -144,6 +200,7 @@ export const roteirizacaoService = {
       filial_id: filial.id,
       filial_nome: filial.nome,
       usuario_id: usuarioId,
+      upload_id: uploadId,
       status: resposta.status as RodadaRoteirizacao['status'],
       tipo_roteirizacao: filtros.tipo_roteirizacao,
       total_cargas_entrada: resposta.resumo.total_cargas_entrada,
@@ -160,9 +217,6 @@ export const roteirizacaoService = {
     return { rodada, manifestos: manifestosComFrete }
   },
 
-  /**
-   * Listar histórico de rodadas
-   */
   async listarRodadas(filialId?: string): Promise<RodadaRoteirizacao[]> {
     let query = supabase
       .from('rodadas_roteirizacao')
@@ -182,9 +236,6 @@ export const roteirizacaoService = {
     })) as RodadaRoteirizacao[]
   },
 
-  /**
-   * Buscar rodada por ID com resposta completa do motor
-   */
   async buscarRodada(id: string): Promise<RodadaRoteirizacao> {
     const { data, error } = await supabase
       .from('rodadas_roteirizacao')
@@ -199,9 +250,6 @@ export const roteirizacaoService = {
     } as RodadaRoteirizacao
   },
 
-  /**
-   * Verificar saúde do motor
-   */
   async verificarMotor(): Promise<boolean> {
     try {
       const response = await fetch(`${MOTOR_URL}/health`, {
