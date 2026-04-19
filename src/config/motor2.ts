@@ -1,3 +1,7 @@
+export const MOTOR_2_BASE_URL = 'https://motor-manus-roteirizador.onrender.com'
+export const MOTOR_2_ROTEIRIZAR_PATH = '/api/v1/roteirizar'
+export const MOTOR_2_HEALTH_PATH = '/health'
+
 const LOCAL_MOTOR_2_FALLBACK_URL = 'http://localhost:8000'
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1'])
 

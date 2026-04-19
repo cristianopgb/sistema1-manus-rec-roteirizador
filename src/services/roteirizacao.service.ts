@@ -1,6 +1,11 @@
 import { supabase } from '@/lib/supabase'
 import { anttService } from './antt.service'
-import { buildMotor2Url } from '@/config/motor2'
+import {
+  buildMotor2Url,
+  getMotor2BaseUrl,
+  MOTOR_2_HEALTH_PATH,
+  MOTOR_2_ROTEIRIZAR_PATH,
+} from '@/config/motor2'
 import {
   PayloadMotor, RespostaMotor, ManifestoComFrete,
   RodadaRoteirizacao, FiltrosRoteirizacao, CarteiraCarga,
@@ -114,13 +119,17 @@ export const roteirizacaoService = {
 
     // 2. Chamar o motor Python
     let resposta: RespostaMotor
-    try {
-      const endpoint = buildMotor2Url('/roteirizar')
-      if (import.meta.env.DEV) {
-        console.debug('[Motor2] iniciando chamada', { endpoint, method: 'POST' })
-      }
+    const motorBaseUrl = getMotor2BaseUrl()
+    const finalUrl = buildMotor2Url(MOTOR_2_ROTEIRIZAR_PATH)
 
-      const response = await fetch(endpoint, {
+    if (import.meta.env.DEV) {
+      console.log('[Motor2] Base URL:', motorBaseUrl)
+      console.log('[Motor2] Path:', MOTOR_2_ROTEIRIZAR_PATH)
+      console.log('[Motor2] Final URL:', finalUrl)
+    }
+
+    try {
+      const response = await fetch(finalUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -128,15 +137,30 @@ export const roteirizacaoService = {
       })
 
       if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('Endpoint do Motor 2 não encontrado (HTTP 404). Verifique a URL e o path configurados.')
+        }
+
         throw new Error(`Motor retornou HTTP ${response.status}`)
       }
 
       resposta = await response.json() as RespostaMotor
     } catch (err) {
       const mensagem = err instanceof Error ? err.message : 'Erro de comunicação com o motor'
+      const status = err instanceof Error && /HTTP (\d{3})/.test(err.message)
+        ? Number(err.message.match(/HTTP (\d{3})/)?.[1])
+        : undefined
+
+      console.error('[Motor2] Falha ao chamar endpoint de roteirização', {
+        finalUrl,
+        status,
+        error: err,
+      })
+
       if (mensagem.includes('VITE_MOTOR_2_URL')) {
         throw new Error(`Configuração inválida do Motor 2: ${mensagem}`)
       }
+
       throw new Error(`Falha ao comunicar com o Motor de Roteirização: ${mensagem}`)
     }
 
@@ -259,7 +283,7 @@ export const roteirizacaoService = {
 
   async verificarMotor(): Promise<boolean> {
     try {
-      const endpoint = buildMotor2Url('/health')
+      const endpoint = buildMotor2Url(MOTOR_2_HEALTH_PATH)
       if (import.meta.env.DEV) {
         console.debug('[Motor2] verificando saúde', { endpoint, method: 'GET' })
       }
