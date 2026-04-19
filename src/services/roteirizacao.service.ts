@@ -1,12 +1,11 @@
 import { supabase } from '@/lib/supabase'
 import { anttService } from './antt.service'
+import { buildMotor2Url } from '@/config/motor2'
 import {
   PayloadMotor, RespostaMotor, ManifestoComFrete,
   RodadaRoteirizacao, FiltrosRoteirizacao, CarteiraCarga,
   Filial, Veiculo
 } from '@/types'
-
-const MOTOR_URL = import.meta.env.VITE_MOTOR_URL || 'http://localhost:8000'
 
 export interface CarteiraFiltros {
   upload_id?: string
@@ -116,7 +115,7 @@ export const roteirizacaoService = {
     // 2. Chamar o motor Python
     let resposta: RespostaMotor
     try {
-      const response = await fetch(`${MOTOR_URL}/roteirizar`, {
+      const response = await fetch(buildMotor2Url('/roteirizar'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -252,7 +251,7 @@ export const roteirizacaoService = {
 
   async verificarMotor(): Promise<boolean> {
     try {
-      const response = await fetch(`${MOTOR_URL}/health`, {
+      const response = await fetch(buildMotor2Url('/health'), {
         signal: AbortSignal.timeout(5000),
       })
       return response.ok
