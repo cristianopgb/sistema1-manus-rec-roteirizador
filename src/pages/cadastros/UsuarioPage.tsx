@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Users, Plus, Pencil, Power, Loader2, X, Check } from 'lucide-react'
+import { Users, Plus, Pencil, Power, Loader2, X, Check, AlertTriangle } from 'lucide-react'
 import { usuariosService } from '@/services/usuarios.service'
 import { filiaisService } from '@/services/filiais.service'
 import { getErrorMessage } from '@/lib/async'
@@ -22,6 +22,7 @@ export function UsuarioPage() {
   const [usuarios, setUsuarios] = useState<UserProfile[]>([])
   const [filiais, setFiliais] = useState<Filial[]>([])
   const [loading, setLoading] = useState(true)
+  const [erroCarregamento, setErroCarregamento] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [editando, setEditando] = useState<UserProfile | null>(null)
   const [form, setForm] = useState<FormUsuario>(FORM_VAZIO)
@@ -29,6 +30,8 @@ export function UsuarioPage() {
 
   const carregar = async () => {
     setLoading(true)
+    setErroCarregamento(null)
+
     try {
       const [u, f] = await Promise.all([
         usuariosService.listar(),
@@ -37,14 +40,19 @@ export function UsuarioPage() {
       setUsuarios(u)
       setFiliais(f)
     } catch (error) {
-      console.error('Erro ao carregar usuários:', error)
-      toast.error(getErrorMessage(error, 'Erro ao carregar usuários'))
+      const mensagem = getErrorMessage(error, 'Não foi possível carregar usuários.')
+      console.error('[UsuarioPage] Falha no carregamento inicial', { mensagem, error })
+      setErroCarregamento(mensagem)
+      setUsuarios([])
+      toast.error(mensagem)
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { carregar() }, [])
+  useEffect(() => {
+    void carregar()
+  }, [])
 
   const abrirNovo = () => {
     setEditando(null)
@@ -94,9 +102,9 @@ export function UsuarioPage() {
         toast.success('Usuário criado. Configure a senha no Supabase Dashboard.')
       }
       setShowModal(false)
-      carregar()
+      void carregar()
     } catch (error) {
-      console.error('Erro ao salvar usuário:', error)
+      console.error('[UsuarioPage] Erro ao salvar usuário', error)
       toast.error(getErrorMessage(error, 'Erro ao salvar usuário'))
     } finally {
       setSalvando(false)
@@ -107,9 +115,9 @@ export function UsuarioPage() {
     try {
       await usuariosService.alternarAtivo(u.id, !u.ativo)
       toast.success(`Usuário ${u.ativo ? 'desativado' : 'ativado'}`)
-      carregar()
+      void carregar()
     } catch (error) {
-      console.error('Erro ao alterar status do usuário:', error)
+      console.error('[UsuarioPage] Erro ao alterar status do usuário', error)
       toast.error(getErrorMessage(error, 'Erro ao alterar status'))
     }
   }
@@ -135,6 +143,20 @@ export function UsuarioPage() {
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 size={24} className="animate-spin text-brand-600" />
+          </div>
+        ) : erroCarregamento ? (
+          <div className="p-6 bg-red-50 border border-red-200 rounded-xl m-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={18} className="text-red-600 mt-0.5" />
+              <div>
+                <p className="text-red-700 text-sm">{erroCarregamento}</p>
+                <button className="btn-secondary mt-3" onClick={() => void carregar()}>Tentar novamente</button>
+              </div>
+            </div>
+          </div>
+        ) : usuarios.length === 0 ? (
+          <div className="p-10 text-center text-gray-500">
+            Nenhum usuário encontrado.
           </div>
         ) : (
           <div className="table-container">

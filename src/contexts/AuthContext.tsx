@@ -1,33 +1,53 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { withTimeout } from '@/lib/async'
+import { withTimeout, getErrorMessage } from '@/lib/async'
 import { UserProfile, Filial } from '@/types'
+
+const PROFILE_TIMEOUT_MS = 30_000
+const FILIAL_TIMEOUT_MS = 20_000
+const PROFILE_RETRY_ATTEMPTS = 2
+const PROFILE_RETRY_DELAY_MS = 600
 
 interface AuthContextType {
   user: User | null
   session: Session | null
   profile: UserProfile | null
+  filialAtiva: Filial | null
   loading: boolean
+  authLoading: boolean
+  profileLoading: boolean
+  profileError: string | null
+  filialLoading: boolean
+  filialError: string | null
   isMaster: boolean
   isRoteirizador: boolean
   filialId: string | null
-  filialAtiva: Filial | null
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
+  reloadProfile: () => Promise<void>
+  reloadFilial: () => Promise<void>
+  reloadAuthContext: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [filialAtiva, setFilialAtiva] = useState<Filial | null>(null)
-  const [loading, setLoading] = useState(true)
 
-  const fetchFilial = useCallback(async (filialId: string): Promise<Filial | null> => {
+  const [authLoading, setAuthLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileError, setProfileError] = useState<string | null>(null)
+  const [filialLoading, setFilialLoading] = useState(false)
+  const [filialError, setFilialError] = useState<string | null>(null)
+
+  const fetchFilialById = useCallback(async (filialId: string): Promise<Filial | null> => {
     try {
       const { data, error } = await withTimeout(
         supabase
@@ -35,121 +55,199 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .select('*')
           .eq('id', filialId)
           .single(),
+        FILIAL_TIMEOUT_MS,
         'Carregamento da filial ativa'
-      )
-      if (error) return null
-      return data as Filial
-    } catch {
-      return null
-    }
-  }, [])
-
-  const fetchProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
-    try {
-      const { data, error } = await withTimeout(
-        supabase
-          .from('usuarios_perfil')
-          .select('id, email, nome, perfil, filial_id, ativo, created_at')
-          .eq('id', userId)
-          .single(),
-        'Carregamento de perfil'
       )
 
       if (error) {
-        console.error('Erro ao buscar perfil:', error)
+        console.error('[AuthContext] Falha ao buscar filial', { filialId, error })
         return null
       }
 
-      return data as UserProfile
-    } catch (err) {
-      console.error('Erro inesperado ao buscar perfil:', err)
+      return data as Filial
+    } catch (error) {
+      console.error('[AuthContext] Erro inesperado ao buscar filial', { filialId, error })
       return null
     }
   }, [])
 
-  const refreshProfile = useCallback(async () => {
-    if (user) {
-      const p = await fetchProfile(user.id)
-      setProfile(p)
-      if (p?.filial_id) {
-        const f = await fetchFilial(p.filial_id)
-        setFilialAtiva(f)
-      } else {
-        setFilialAtiva(null)
-      }
-    }
-  }, [user, fetchProfile, fetchFilial])
+  const fetchProfileByUserId = useCallback(async (userId: string): Promise<UserProfile | null> => {
+    let lastError: unknown = null
 
-  useEffect(() => {
-    supabase.auth.getSession()
-      .then(({ data: { session }, error }) => {
+    for (let attempt = 1; attempt <= PROFILE_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        const { data, error } = await withTimeout(
+          supabase
+            .from('usuarios_perfil')
+            .select('id, email, nome, perfil, filial_id, ativo, created_at')
+            .eq('id', userId)
+            .single(),
+          PROFILE_TIMEOUT_MS,
+          'Carregamento de perfil'
+        )
+
         if (error) {
-          console.error('[Auth] Falha ao obter sessão inicial:', error)
-        }
-
-        setSession(session)
-        setUser(session?.user ?? null)
-        if (session?.user) {
-          fetchProfile(session.user.id).then(async (p) => {
-            if (!p) {
-              console.error('[Auth] Sessão existe, mas perfil não foi encontrado', {
-                userId: session.user.id,
-                email: session.user.email,
-              })
-            }
-
-            setProfile(p)
-            if (p?.filial_id) {
-              const f = await fetchFilial(p.filial_id)
-              if (!f) {
-                console.error('[Auth] Perfil possui filial_id, mas filial não foi carregada', {
-                  userId: session.user.id,
-                  filialId: p.filial_id,
-                })
-              }
-              setFilialAtiva(f)
-            }
-            setLoading(false)
+          lastError = error
+          console.error('[AuthContext] Tentativa de perfil retornou erro', {
+            userId,
+            attempt,
+            error,
           })
         } else {
-          setLoading(false)
+          return data as UserProfile
         }
-      })
-      .catch((err) => {
-        console.error('[Auth] Erro inesperado ao inicializar sessão:', err)
-        setLoading(false)
-      })
+      } catch (error) {
+        lastError = error
+        console.error('[AuthContext] Tentativa de perfil falhou', {
+          userId,
+          attempt,
+          error,
+        })
+      }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session)
-        setUser(session?.user ?? null)
-        if (session?.user) {
-          const p = await fetchProfile(session.user.id)
-          setProfile(p)
-          if (p?.filial_id) {
-            const f = await fetchFilial(p.filial_id)
-            setFilialAtiva(f)
-          } else {
-            setFilialAtiva(null)
-          }
+      if (attempt < PROFILE_RETRY_ATTEMPTS) {
+        await delay(PROFILE_RETRY_DELAY_MS)
+      }
+    }
+
+    console.error('[AuthContext] Perfil indisponível após tentativas', { userId, lastError })
+    return null
+  }, [])
+
+  const loadFilialFromProfile = useCallback(async (profileData: UserProfile | null) => {
+    if (!profileData) {
+      setFilialAtiva(null)
+      setFilialError(null)
+      return
+    }
+
+    if (!profileData.filial_id) {
+      setFilialAtiva(null)
+      if (profileData.perfil === 'master') {
+        setFilialError(null)
+      } else {
+        setFilialError('Perfil sem filial vinculada. Entre em contato com o administrador.')
+      }
+      return
+    }
+
+    setFilialLoading(true)
+    setFilialError(null)
+
+    const filial = await fetchFilialById(profileData.filial_id)
+    if (!filial) {
+      setFilialAtiva(null)
+      setFilialError('Não foi possível carregar a filial do perfil.')
+      setFilialLoading(false)
+      return
+    }
+
+    setFilialAtiva(filial)
+    setFilialLoading(false)
+  }, [fetchFilialById])
+
+  const loadProfileAndFilial = useCallback(async (currentUser: User) => {
+    setProfileLoading(true)
+    setProfileError(null)
+
+    const profileData = await fetchProfileByUserId(currentUser.id)
+    setProfile(profileData)
+
+    if (!profileData) {
+      setProfileError('Não foi possível carregar o perfil. Tente novamente.')
+      setFilialAtiva(null)
+      setFilialError(null)
+      setProfileLoading(false)
+      return
+    }
+
+    await loadFilialFromProfile(profileData)
+    setProfileLoading(false)
+  }, [fetchProfileByUserId, loadFilialFromProfile])
+
+  const refreshProfile = useCallback(async () => {
+    if (!user) return
+    await loadProfileAndFilial(user)
+  }, [user, loadProfileAndFilial])
+
+  const reloadProfile = useCallback(async () => {
+    if (!user) return
+    await loadProfileAndFilial(user)
+  }, [user, loadProfileAndFilial])
+
+  const reloadFilial = useCallback(async () => {
+    await loadFilialFromProfile(profile)
+  }, [profile, loadFilialFromProfile])
+
+  const reloadAuthContext = useCallback(async () => {
+    if (!user) return
+    await loadProfileAndFilial(user)
+  }, [user, loadProfileAndFilial])
+
+  useEffect(() => {
+    let mounted = true
+
+    supabase.auth.getSession()
+      .then(async ({ data: { session: initialSession }, error }) => {
+        if (!mounted) return
+
+        if (error) {
+          console.error('[AuthContext] Falha ao obter sessão inicial', error)
+        }
+
+        setSession(initialSession)
+        setUser(initialSession?.user ?? null)
+        setAuthLoading(false)
+
+        if (initialSession?.user) {
+          await loadProfileAndFilial(initialSession.user)
         } else {
           setProfile(null)
           setFilialAtiva(null)
+          setProfileError(null)
+          setFilialError(null)
         }
-        setLoading(false)
+      })
+      .catch((error) => {
+        if (!mounted) return
+        console.error('[AuthContext] Erro inesperado ao inicializar sessão', error)
+        setAuthLoading(false)
+      })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, nextSession) => {
+        if (!mounted) return
+
+        setSession(nextSession)
+        setUser(nextSession?.user ?? null)
+        setAuthLoading(false)
+
+        if (nextSession?.user) {
+          await loadProfileAndFilial(nextSession.user)
+        } else {
+          setProfile(null)
+          setFilialAtiva(null)
+          setProfileError(null)
+          setFilialError(null)
+          setProfileLoading(false)
+          setFilialLoading(false)
+        }
       }
     )
 
-    return () => subscription.unsubscribe()
-  }, [fetchProfile, fetchFilial])
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
+  }, [loadProfileAndFilial])
 
   const signIn = async (email: string, password: string) => {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       return { error: error as Error | null }
-    } catch (err) {
-      return { error: err as Error }
+    } catch (error) {
+      console.error('[AuthContext] Erro no signIn', error)
+      return { error: new Error(getErrorMessage(error, 'Erro ao autenticar usuário')) }
     }
   }
 
@@ -157,11 +255,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut()
     setProfile(null)
     setFilialAtiva(null)
+    setProfileError(null)
+    setFilialError(null)
   }
 
   const isMaster = profile?.perfil === 'master'
   const isRoteirizador = profile?.perfil === 'roteirizador'
   const filialId = profile?.filial_id ?? null
+  const loading = authLoading
 
   return (
     <AuthContext.Provider
@@ -169,14 +270,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         session,
         profile,
+        filialAtiva,
         loading,
+        authLoading,
+        profileLoading,
+        profileError,
+        filialLoading,
+        filialError,
         isMaster,
         isRoteirizador,
         filialId,
-        filialAtiva,
         signIn,
         signOut,
         refreshProfile,
+        reloadProfile,
+        reloadFilial,
+        reloadAuthContext,
       }}
     >
       {children}

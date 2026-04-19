@@ -4,7 +4,6 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 
-// Pages
 import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { RoteirizacaoPage } from '@/pages/RoteirizacaoPage'
@@ -15,21 +14,60 @@ import { TabelaAnttPage } from '@/pages/cadastros/TabelaAnttPage'
 import { HistoricoPage } from '@/pages/HistoricoPage'
 
 function ProtectedRoute({ children, masterOnly = false }: { children: React.ReactNode; masterOnly?: boolean }) {
-  const { user, profile, loading } = useAuth()
+  const { user, profile, authLoading, profileLoading, profileError, reloadAuthContext } = useAuth()
 
-  if (loading) {
+  if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-brand-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-500 text-sm">Carregando...</p>
+          <p className="text-gray-500 text-sm">Carregando autenticação...</p>
         </div>
       </div>
     )
   }
 
-  if (!user || !profile) {
+  if (!user) {
     return <Navigate to="/login" replace />
+  }
+
+  if (profileLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-brand-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-500 text-sm">Carregando perfil...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (profileError && !profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white border border-red-200 rounded-xl p-6">
+          <h2 className="text-lg font-semibold text-red-700">Falha ao carregar perfil</h2>
+          <p className="text-sm text-gray-600 mt-2">{profileError}</p>
+          <button className="btn-primary mt-4" onClick={() => void reloadAuthContext()}>
+            Tentar novamente
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white border border-amber-200 rounded-xl p-6">
+          <h2 className="text-lg font-semibold text-amber-700">Perfil indisponível</h2>
+          <p className="text-sm text-gray-600 mt-2">Não foi possível validar seu perfil no momento.</p>
+          <button className="btn-primary mt-4" onClick={() => void reloadAuthContext()}>
+            Recarregar perfil
+          </button>
+        </div>
+      </div>
+    )
   }
 
   if (!profile.ativo) {
@@ -54,9 +92,9 @@ function ProtectedRoute({ children, masterOnly = false }: { children: React.Reac
 }
 
 function AppRoutes() {
-  const { user, loading } = useAuth()
+  const { user, authLoading } = useAuth()
 
-  if (loading) {
+  if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="w-12 h-12 border-4 border-brand-600 border-t-transparent rounded-full animate-spin" />
@@ -82,7 +120,6 @@ function AppRoutes() {
         <Route path="roteirizacao" element={<RoteirizacaoPage />} />
         <Route path="historico" element={<HistoricoPage />} />
 
-        {/* Rotas exclusivas do Master */}
         <Route path="cadastros">
           <Route path="filiais" element={<ProtectedRoute masterOnly><FilialPage /></ProtectedRoute>} />
           <Route path="veiculos" element={<ProtectedRoute masterOnly><VeiculoPage /></ProtectedRoute>} />

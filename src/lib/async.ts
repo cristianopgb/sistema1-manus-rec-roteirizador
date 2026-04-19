@@ -15,9 +15,17 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = resolveDefaultTimeoutMs()
 
 export async function withTimeout<T>(
   promise: PromiseLike<T>,
-  operation: string,
-  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
+  operationOrTimeoutMs: string | number,
+  maybeTimeoutOrMessage?: number | string
 ): Promise<T> {
+  const operation = typeof operationOrTimeoutMs === 'string'
+    ? operationOrTimeoutMs
+    : (typeof maybeTimeoutOrMessage === 'string' ? maybeTimeoutOrMessage : 'Requisição')
+
+  const timeoutMs = typeof operationOrTimeoutMs === 'number'
+    ? operationOrTimeoutMs
+    : (typeof maybeTimeoutOrMessage === 'number' ? maybeTimeoutOrMessage : DEFAULT_REQUEST_TIMEOUT_MS)
+
   let timeoutId: ReturnType<typeof setTimeout> | null = null
 
   const timeoutPromise = new Promise<never>((_, reject) => {

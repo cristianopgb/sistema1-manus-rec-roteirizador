@@ -1,18 +1,19 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import {
-  Upload, FileSpreadsheet, Filter, Play, Loader2,
-  CheckCircle, XCircle, AlertTriangle, ChevronDown,
-  ChevronUp, Trash2, ArrowUpDown, Printer, Eye,
+  Upload, FileSpreadsheet, Play, Loader2,
+  CheckCircle, XCircle, AlertTriangle,
   RotateCcw, Package, Truck, MapPin, Clock
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUploadCarteira } from '@/hooks/useUploadCarteira'
 import { roteirizacaoService } from '@/services/roteirizacao.service'
 import { veiculosService } from '@/services/veiculos.service'
-import { ManifestoComFrete, RodadaRoteirizacao, FiltrosRoteirizacao } from '@/types'
+import { filiaisService } from '@/services/filiais.service'
+import { ManifestoComFrete, RodadaRoteirizacao, FiltrosRoteirizacao, Filial } from '@/types'
 import { ManifestoCard } from '@/components/roteirizacao/ManifestoCard'
 import { EncadeamentoPanel } from '@/components/roteirizacao/EncadeamentoPanel'
 import { NaoRoteirizadosPanel } from '@/components/roteirizacao/NaoRoteirizadosPanel'
+import { getErrorMessage } from '@/lib/async'
 import toast from 'react-hot-toast'
 
 type Etapa = 'upload' | 'preview' | 'filtros' | 'processando' | 'resultado'
@@ -24,7 +25,17 @@ const TIPOS_ROTEIRIZACAO = [
 ]
 
 export function RoteirizacaoPage() {
-  const { user, filialAtiva } = useAuth()
+  const {
+    user,
+    filialAtiva,
+    isMaster,
+    profileLoading,
+    profileError,
+    filialLoading,
+    filialError,
+    reloadAuthContext,
+  } = useAuth()
+
   const { state: upload, processar, limpar } = useUploadCarteira()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -43,13 +54,60 @@ export function RoteirizacaoPage() {
   const [manifestos, setManifestos] = useState<ManifestoComFrete[]>([])
   const [abaAtiva, setAbaAtiva] = useState<'manifestos' | 'encadeamento' | 'nao_roteirizados'>('manifestos')
 
+  const [filiaisMaster, setFiliaisMaster] = useState<Filial[]>([])
+  const [filiaisMasterLoading, setFiliaisMasterLoading] = useState(false)
+  const [filiaisMasterError, setFiliaisMasterError] = useState<string | null>(null)
+  const [filialSelecionadaMaster, setFilialSelecionadaMaster] = useState('')
+
+  const filialOperacionalId = isMaster ? filialSelecionadaMaster : (filialAtiva?.id ?? '')
+  const filialOperacional = useMemo(() => {
+    if (isMaster) {
+      return filiaisMaster.find((f) => f.id === filialSelecionadaMaster) ?? null
+    }
+    return filialAtiva ?? null
+  }, [isMaster, filialAtiva, filiaisMaster, filialSelecionadaMaster])
+
+  useEffect(() => {
+    setFiltros((prev) => ({ ...prev, filial_id: filialOperacionalId }))
+  }, [filialOperacionalId])
+
+  useEffect(() => {
+    const carregarFiliaisMaster = async () => {
+      if (!isMaster) {
+        setFiliaisMaster([])
+        setFilialSelecionadaMaster('')
+        setFiliaisMasterError(null)
+        return
+      }
+
+      setFiliaisMasterLoading(true)
+      setFiliaisMasterError(null)
+
+      try {
+        const data = await filiaisService.buscarAtivas()
+        setFiliaisMaster(data)
+        setFilialSelecionadaMaster((prev) => {
+          if (prev && data.some((f) => f.id === prev)) return prev
+          return data[0]?.id ?? ''
+        })
+      } catch (error) {
+        console.error('[RoteirizacaoPage] Falha ao carregar filiais para master', error)
+        setFiliaisMasterError(getErrorMessage(error, 'Não foi possível carregar as filiais ativas.'))
+      } finally {
+        setFiliaisMasterLoading(false)
+      }
+    }
+
+    carregarFiliaisMaster()
+  }, [isMaster])
+
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
       const file = e.dataTransfer.files[0]
       if (file) handleArquivo(file)
     },
-    []
+    [filialOperacionalId, user?.id]
   )
 
   const handleArquivo = async (file: File) => {
@@ -57,12 +115,18 @@ export function RoteirizacaoPage() {
       toast.error('Formato inválido. Use .xlsx, .xls ou .csv')
       return
     }
-    if (!user?.id || !filialAtiva?.id) {
-      toast.error('Usuário ou filial não identificados para importar carteira')
+
+    if (!user?.id) {
+      toast.error('Usuário não identificado para importar carteira')
       return
     }
 
-    await processar(file, user.id, filialAtiva.id)
+    if (!filialOperacionalId) {
+      toast.error('Selecione uma filial para continuar')
+      return
+    }
+
+    await processar(file, user.id, filialOperacionalId)
     setEtapa('preview')
   }
 
@@ -75,8 +139,8 @@ export function RoteirizacaoPage() {
   }
 
   const roteirizar = async () => {
-    if (!filialAtiva) {
-      toast.error('Filial não identificada')
+    if (!filialOperacionalId || !filialOperacional) {
+      toast.error('Selecione uma filial válida para roteirizar')
       return
     }
     if (!filtros.data_base) {
@@ -87,14 +151,17 @@ export function RoteirizacaoPage() {
       toast.error('Upload não encontrado. Reimporte a carteira.')
       return
     }
+    if (!user?.id) {
+      toast.error('Usuário não autenticado')
+      return
+    }
 
     setProcessando(true)
     setEtapa('processando')
 
     try {
-      // Buscar veículos ativos da filial
       setProgressoMsg('Carregando frota da filial...')
-      const veiculos = await veiculosService.listarAtivos(filialAtiva.id)
+      const veiculos = await veiculosService.listarAtivos(filialOperacionalId)
 
       if (veiculos.length === 0) {
         toast.error('Nenhum veículo ativo cadastrado para esta filial')
@@ -105,13 +172,12 @@ export function RoteirizacaoPage() {
 
       setProgressoMsg(`${veiculos.length} veículo(s) carregado(s). Enviando para o Motor...`)
 
-      // Disparar roteirização
       const resultado = await roteirizacaoService.roteirizar(
-        filialAtiva,
+        filialOperacional,
         veiculos,
         upload.uploadId,
-        filtros,
-        user!.id
+        { ...filtros, filial_id: filialOperacionalId },
+        user.id
       )
 
       setRodada(resultado.rodada)
@@ -146,6 +212,39 @@ export function RoteirizacaoPage() {
     )
   }
 
+  const estadoAuthBloqueante = profileLoading || filialLoading
+
+  if (estadoAuthBloqueante) {
+    return (
+      <div className="fade-in max-w-2xl mx-auto">
+        <div className="card p-8 text-center">
+          <Loader2 className="mx-auto mb-3 animate-spin text-brand-600" />
+          <h2 className="font-semibold text-gray-900">Carregando perfil...</h2>
+          <p className="text-sm text-gray-500 mt-2">Aguarde enquanto validamos perfil e filial.</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (profileError) {
+    return (
+      <div className="fade-in max-w-2xl mx-auto">
+        <div className="card p-6 border border-red-200 bg-red-50">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="text-red-600 mt-0.5" size={18} />
+            <div>
+              <h2 className="font-semibold text-red-800">Não foi possível carregar o perfil.</h2>
+              <p className="text-sm text-red-700 mt-1">{profileError}</p>
+              <button className="btn-primary mt-4" onClick={() => void reloadAuthContext()}>
+                <RotateCcw size={14} /> Tentar novamente
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // ─── ETAPA: UPLOAD ────────────────────────────────────────────────────────
   if (etapa === 'upload') {
     return (
@@ -153,9 +252,32 @@ export function RoteirizacaoPage() {
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-gray-900">Nova Roteirização</h1>
           <p className="text-gray-500 mt-1">
-            Filial: <strong>{filialAtiva?.nome || '—'}</strong>
+            Filial: <strong>{filialOperacional?.nome || '—'}</strong>
           </p>
         </div>
+
+        {isMaster && (
+          <div className="card p-4 mb-4 space-y-2">
+            <label className="label">Filial operacional *</label>
+            <select
+              className="input"
+              value={filialSelecionadaMaster}
+              onChange={(e) => setFilialSelecionadaMaster(e.target.value)}
+              disabled={filiaisMasterLoading}
+            >
+              <option value="">Selecione uma filial...</option>
+              {filiaisMaster.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+            </select>
+            {filiaisMasterError && <p className="text-sm text-red-600">{filiaisMasterError}</p>}
+          </div>
+        )}
+
+        {filialError && (
+          <div className="mt-4 mb-4 bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3">
+            <AlertTriangle size={18} className="text-amber-600 flex-shrink-0" />
+            <p className="text-amber-700 text-sm">{filialError}</p>
+          </div>
+        )}
 
         <div
           className="border-2 border-dashed border-brand-300 rounded-2xl p-12 text-center cursor-pointer hover:border-brand-500 hover:bg-brand-50 transition-all"
@@ -178,6 +300,10 @@ export function RoteirizacaoPage() {
           />
         </div>
 
+        {!filialOperacionalId && (
+          <p className="text-sm text-amber-700 mt-3">Selecione uma filial para continuar.</p>
+        )}
+
         {upload.carregando && (
           <div className="flex items-center justify-center gap-2 mt-6 text-brand-600">
             <Loader2 size={20} className="animate-spin" />
@@ -195,7 +321,6 @@ export function RoteirizacaoPage() {
     )
   }
 
-  // ─── ETAPA: PREVIEW ───────────────────────────────────────────────────────
   if (etapa === 'preview') {
     return (
       <div className="fade-in">
@@ -209,7 +334,6 @@ export function RoteirizacaoPage() {
           </button>
         </div>
 
-        {/* Resumo */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="card p-4 text-center">
             <FileSpreadsheet size={24} className="mx-auto text-brand-600 mb-2" />
@@ -228,11 +352,10 @@ export function RoteirizacaoPage() {
           </div>
         </div>
 
-        {/* Tabela preview */}
         <div className="card mb-6">
           <div className="card-header">
             <h3>Primeiras 5 linhas</h3>
-            <span className="text-sm text-gray-500">Linha de cabeçalho detectada: {upload.linhaCabecalhoDetectada ?? "—"}</span>
+            <span className="text-sm text-gray-500">Linha de cabeçalho detectada: {upload.linhaCabecalhoDetectada ?? '—'}</span>
           </div>
           <div className="table-container">
             <table className="table text-xs">
@@ -248,9 +371,7 @@ export function RoteirizacaoPage() {
                 {upload.preview.map((row, i) => (
                   <tr key={i}>
                     {upload.colunasDetectadas.slice(0, 12).map((col) => (
-                      <td key={col} className="max-w-[120px] truncate">
-                        {String(row[col] ?? '—')}
-                      </td>
+                      <td key={col} className="max-w-[120px] truncate">{String(row[col] ?? '—')}</td>
                     ))}
                     {upload.colunasDetectadas.length > 12 && <td className="text-gray-400">...</td>}
                   </tr>
@@ -270,32 +391,31 @@ export function RoteirizacaoPage() {
     )
   }
 
-  // ─── ETAPA: FILTROS ───────────────────────────────────────────────────────
   if (etapa === 'filtros') {
     return (
       <div className="fade-in max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1>Configurar Roteirização</h1>
-            <p className="text-gray-500 text-sm">{upload.totalLinhas} cargas · {filialAtiva?.nome}</p>
+            <p className="text-gray-500 text-sm">{upload.totalLinhas} cargas · {filialOperacional?.nome || 'Filial não selecionada'}</p>
           </div>
-          <button className="btn-ghost" onClick={() => setEtapa('preview')}>
-            Voltar
-          </button>
+          <button className="btn-ghost" onClick={() => setEtapa('preview')}>Voltar</button>
         </div>
 
         <div className="card p-6 space-y-6">
+          {isMaster && (
+            <div>
+              <label className="label">Filial operacional *</label>
+              <select className="input" value={filialSelecionadaMaster} onChange={(e) => setFilialSelecionadaMaster(e.target.value)}>
+                <option value="">Selecione a filial...</option>
+                {filiaisMaster.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+              </select>
+            </div>
+          )}
+
           <div>
             <label className="label">Data Base da Roteirização *</label>
-            <input
-              type="datetime-local"
-              className="input"
-              value={filtros.data_base}
-              onChange={(e) => setFiltros({ ...filtros, data_base: e.target.value })}
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Data de referência para calcular folga de agendamentos e prioridades
-            </p>
+            <input type="datetime-local" className="input" value={filtros.data_base} onChange={(e) => setFiltros({ ...filtros, data_base: e.target.value })} />
           </div>
 
           <div>
@@ -305,9 +425,7 @@ export function RoteirizacaoPage() {
                 <label
                   key={tipo.value}
                   className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                    filtros.tipo_roteirizacao === tipo.value
-                      ? 'border-brand-500 bg-brand-50'
-                      : 'border-gray-200 hover:border-gray-300'
+                    filtros.tipo_roteirizacao === tipo.value ? 'border-brand-500 bg-brand-50' : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
                   <input
@@ -326,23 +444,11 @@ export function RoteirizacaoPage() {
               ))}
             </div>
           </div>
-
-          {/* Resumo da frota */}
-          <div className="bg-gray-50 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Truck size={16} className="text-gray-600" />
-              <span className="text-sm font-semibold text-gray-700">Frota da filial será carregada automaticamente</span>
-            </div>
-            <p className="text-xs text-gray-500">
-              Todos os veículos ativos da filial {filialAtiva?.nome} serão utilizados na roteirização.
-              Gerencie a frota em Cadastros → Veículos.
-            </p>
-          </div>
         </div>
 
         <div className="flex justify-end gap-3 mt-6">
           <button className="btn-secondary" onClick={() => setEtapa('preview')}>Voltar</button>
-          <button className="btn-primary text-base px-8 py-3" onClick={roteirizar}>
+          <button className="btn-primary text-base px-8 py-3" onClick={roteirizar} disabled={!filialOperacionalId}>
             <Play size={18} /> Roteirizar Agora
           </button>
         </div>
@@ -350,7 +456,6 @@ export function RoteirizacaoPage() {
     )
   }
 
-  // ─── ETAPA: PROCESSANDO ───────────────────────────────────────────────────
   if (etapa === 'processando') {
     return (
       <div className="fade-in flex flex-col items-center justify-center min-h-[60vh]">
@@ -367,33 +472,16 @@ export function RoteirizacaoPage() {
             <span>Isso pode levar até 3 minutos para carteiras grandes</span>
           </div>
         </div>
-
-        {/* Pipeline visual */}
-        <div className="mt-10 flex items-center gap-3">
-          {['M1 Padronização', 'M2 Enriquecimento', 'M3 Triagem', 'M4 Manifestos', 'M5 Composição', 'M6 Consolidação', 'M7 Sequenciamento'].map((m, i) => (
-            <div key={m} className="flex items-center gap-3">
-              <div className="flex flex-col items-center">
-                <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-xs font-bold text-brand-700 animate-pulse">
-                  {i + 1}
-                </div>
-                <span className="text-xs text-gray-400 mt-1 whitespace-nowrap hidden lg:block">{m.split(' ')[0]}</span>
-              </div>
-              {i < 6 && <div className="w-4 h-0.5 bg-brand-200" />}
-            </div>
-          ))}
-        </div>
       </div>
     )
   }
 
-  // ─── ETAPA: RESULTADO ─────────────────────────────────────────────────────
   if (etapa === 'resultado' && rodada) {
     const manifestosAtivos = manifestos.filter((m) => !m.excluido)
     const totalFreteMinimo = manifestosAtivos.reduce((sum, m) => sum + (m.frete_minimo_antt || 0), 0)
 
     return (
       <div className="fade-in">
-        {/* Header resultado */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -401,7 +489,7 @@ export function RoteirizacaoPage() {
               <h1>Roteirização Concluída</h1>
             </div>
             <p className="text-gray-500 text-sm">
-              {filialAtiva?.nome} · {new Date(rodada.created_at).toLocaleString('pt-BR')} ·
+              {filialOperacional?.nome} · {new Date(rodada.created_at).toLocaleString('pt-BR')} ·
               {(rodada.tempo_processamento_ms / 1000).toFixed(1)}s
             </p>
           </div>
@@ -410,7 +498,6 @@ export function RoteirizacaoPage() {
           </button>
         </div>
 
-        {/* KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           {[
             { label: 'Manifestos', value: manifestosAtivos.length, icon: Package, color: 'text-brand-600' },
@@ -427,7 +514,6 @@ export function RoteirizacaoPage() {
           ))}
         </div>
 
-        {/* Abas */}
         <div className="flex gap-1 mb-4 bg-gray-100 rounded-xl p-1 w-fit">
           {[
             { key: 'manifestos', label: `Manifestos (${manifestosAtivos.length})` },
@@ -436,9 +522,7 @@ export function RoteirizacaoPage() {
           ].map(({ key, label }) => (
             <button
               key={key}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                abaAtiva === key ? 'bg-white shadow text-brand-700' : 'text-gray-600 hover:text-gray-900'
-              }`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${abaAtiva === key ? 'bg-white shadow text-brand-700' : 'text-gray-600 hover:text-gray-900'}`}
               onClick={() => setAbaAtiva(key as typeof abaAtiva)}
             >
               {label}
@@ -446,7 +530,6 @@ export function RoteirizacaoPage() {
           ))}
         </div>
 
-        {/* Conteúdo das abas */}
         {abaAtiva === 'manifestos' && (
           <div className="space-y-4">
             {manifestosAtivos.length === 0 ? (
