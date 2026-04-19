@@ -81,22 +81,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, fetchProfile, fetchFilial])
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchProfile(session.user.id).then(async (p) => {
-          setProfile(p)
-          if (p?.filial_id) {
-            const f = await fetchFilial(p.filial_id)
-            setFilialAtiva(f)
-          }
+    supabase.auth.getSession()
+      .then(({ data: { session }, error }) => {
+        if (error) {
+          console.error('[Auth] Falha ao obter sessão inicial:', error)
+        }
+
+        setSession(session)
+        setUser(session?.user ?? null)
+        if (session?.user) {
+          fetchProfile(session.user.id).then(async (p) => {
+            if (!p) {
+              console.error('[Auth] Sessão existe, mas perfil não foi encontrado', {
+                userId: session.user.id,
+                email: session.user.email,
+              })
+            }
+
+            setProfile(p)
+            if (p?.filial_id) {
+              const f = await fetchFilial(p.filial_id)
+              if (!f) {
+                console.error('[Auth] Perfil possui filial_id, mas filial não foi carregada', {
+                  userId: session.user.id,
+                  filialId: p.filial_id,
+                })
+              }
+              setFilialAtiva(f)
+            }
+            setLoading(false)
+          })
+        } else {
           setLoading(false)
-        })
-      } else {
+        }
+      })
+      .catch((err) => {
+        console.error('[Auth] Erro inesperado ao inicializar sessão:', err)
         setLoading(false)
-      }
-    })
+      })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
