@@ -36,8 +36,8 @@ export interface Veiculo {
   id: string
   filial_id: string
   filial_nome?: string
-  codigo: string
-  placa: string
+  codigo?: string | null
+  placa?: string | null
   tipo: 'VUC' | '3/4' | 'TOCO' | 'TRUCK' | 'CARRETA' | 'BITRUCK'
   capacidade_peso_kg: number
   capacidade_volume_m3: number
@@ -46,7 +46,7 @@ export interface Veiculo {
   max_entregas: number
   ocupacao_minima_perc: number
   ocupacao_maxima_perc: number
-  motorista?: string
+  motorista?: string | null
   ativo: boolean
   created_at: string
 }

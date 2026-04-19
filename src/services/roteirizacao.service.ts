@@ -41,8 +41,8 @@ export const roteirizacaoService = {
       },
       veiculos: veiculos.map((v) => ({
         id: v.id,
-        codigo: v.codigo,
-        placa: v.placa,
+        codigo: v.codigo || `VEIC-${v.id.slice(0, 8).toUpperCase()}`,
+        placa: v.placa || 'N/I',
         tipo: v.tipo,
         capacidade_peso_kg: v.capacidade_peso_kg,
         capacidade_volume_m3: v.capacidade_volume_m3,
@@ -51,7 +51,7 @@ export const roteirizacaoService = {
         max_entregas: v.max_entregas,
         ocupacao_minima_perc: v.ocupacao_minima_perc,
         ocupacao_maxima_perc: v.ocupacao_maxima_perc,
-        motorista: v.motorista,
+        motorista: v.motorista || undefined,
       })),
       carteira,
     }

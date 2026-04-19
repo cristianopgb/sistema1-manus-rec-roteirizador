@@ -10,8 +10,6 @@ const TIPOS_VEICULO = ['VUC', '3/4', 'TOCO', 'TRUCK', 'CARRETA', 'BITRUCK'] as c
 
 interface FormVeiculo {
   filial_id: string
-  codigo: string
-  placa: string
   tipo: string
   capacidade_peso_kg: string
   capacidade_volume_m3: string
@@ -20,15 +18,13 @@ interface FormVeiculo {
   max_entregas: string
   ocupacao_minima_perc: string
   ocupacao_maxima_perc: string
-  motorista: string
 }
 
 const FORM_VAZIO: FormVeiculo = {
-  filial_id: '', codigo: '', placa: '', tipo: 'TOCO',
+  filial_id: '', tipo: 'TOCO',
   capacidade_peso_kg: '', capacidade_volume_m3: '',
   num_eixos: '2', max_km_distancia: '', max_entregas: '',
   ocupacao_minima_perc: '70', ocupacao_maxima_perc: '100',
-  motorista: '',
 }
 
 // Defaults por tipo de veículo
@@ -80,8 +76,6 @@ export function VeiculoPage() {
     setEditando(v)
     setForm({
       filial_id: v.filial_id,
-      codigo: v.codigo,
-      placa: v.placa,
       tipo: v.tipo,
       capacidade_peso_kg: String(v.capacidade_peso_kg),
       capacidade_volume_m3: String(v.capacidade_volume_m3),
@@ -90,7 +84,6 @@ export function VeiculoPage() {
       max_entregas: String(v.max_entregas),
       ocupacao_minima_perc: String(v.ocupacao_minima_perc),
       ocupacao_maxima_perc: String(v.ocupacao_maxima_perc),
-      motorista: v.motorista || '',
     })
     setShowModal(true)
   }
@@ -101,7 +94,7 @@ export function VeiculoPage() {
   }
 
   const salvar = async () => {
-    if (!form.filial_id || !form.codigo || !form.placa || !form.tipo) {
+    if (!form.filial_id || !form.tipo) {
       toast.error('Preencha todos os campos obrigatórios')
       return
     }
@@ -109,8 +102,6 @@ export function VeiculoPage() {
     try {
       const payload = {
         filial_id: form.filial_id,
-        codigo: form.codigo.toUpperCase(),
-        placa: form.placa.toUpperCase(),
         tipo: form.tipo as Veiculo['tipo'],
         capacidade_peso_kg: parseFloat(form.capacidade_peso_kg),
         capacidade_volume_m3: parseFloat(form.capacidade_volume_m3),
@@ -119,7 +110,6 @@ export function VeiculoPage() {
         max_entregas: parseInt(form.max_entregas),
         ocupacao_minima_perc: parseFloat(form.ocupacao_minima_perc),
         ocupacao_maxima_perc: parseFloat(form.ocupacao_maxima_perc),
-        motorista: form.motorista || null,
         ativo: true,
       }
       if (editando) {
@@ -188,7 +178,6 @@ export function VeiculoPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Código / Placa</th>
                   <th>Tipo</th>
                   <th>Filial</th>
                   <th>Cap. Peso</th>
@@ -196,7 +185,6 @@ export function VeiculoPage() {
                   <th>Eixos</th>
                   <th>Max KM</th>
                   <th>Ocup. Mín</th>
-                  <th>Motorista</th>
                   <th>Status</th>
                   <th>Ações</th>
                 </tr>
@@ -204,10 +192,6 @@ export function VeiculoPage() {
               <tbody>
                 {veiculos.map((v) => (
                   <tr key={v.id}>
-                    <td>
-                      <div className="font-semibold text-brand-700">{v.codigo}</div>
-                      <div className="text-xs text-gray-500 font-mono">{v.placa}</div>
-                    </td>
                     <td><span className="badge-blue">{v.tipo}</span></td>
                     <td className="text-gray-600">{v.filial_nome}</td>
                     <td>{v.capacidade_peso_kg.toLocaleString('pt-BR')} kg</td>
@@ -215,7 +199,6 @@ export function VeiculoPage() {
                     <td className="text-center">{v.num_eixos}</td>
                     <td>{v.max_km_distancia.toLocaleString('pt-BR')} km</td>
                     <td>{v.ocupacao_minima_perc}%</td>
-                    <td className="text-gray-600">{v.motorista || '—'}</td>
                     <td>
                       <span className={v.ativo ? 'badge-green' : 'badge-red'}>
                         {v.ativo ? 'Ativo' : 'Inativo'}
@@ -263,18 +246,6 @@ export function VeiculoPage() {
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Código *</label>
-                  <input className="input uppercase" value={form.codigo}
-                    onChange={(e) => setForm({ ...form, codigo: e.target.value })} placeholder="VUC-01" />
-                </div>
-                <div>
-                  <label className="label">Placa *</label>
-                  <input className="input uppercase" value={form.placa}
-                    onChange={(e) => setForm({ ...form, placa: e.target.value })} placeholder="ABC-1234" />
-                </div>
-              </div>
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="label">Cap. Peso (kg) *</label>
@@ -310,11 +281,6 @@ export function VeiculoPage() {
                   <input className="input" type="number" min="0" max="100" value={form.ocupacao_minima_perc}
                     onChange={(e) => setForm({ ...form, ocupacao_minima_perc: e.target.value })} />
                 </div>
-              </div>
-              <div>
-                <label className="label">Motorista</label>
-                <input className="input" value={form.motorista}
-                  onChange={(e) => setForm({ ...form, motorista: e.target.value })} placeholder="Nome do motorista" />
               </div>
             </div>
             <div className="flex justify-end gap-3 px-6 py-4 border-t sticky bottom-0 bg-white">
