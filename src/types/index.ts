@@ -93,6 +93,7 @@ export interface RodadaRoteirizacao {
   filial_id: string
   filial_nome?: string
   usuario_id: string
+  upload_id?: string | null
   usuario_nome?: string
   status: StatusRodada
   tipo_roteirizacao: TipoRoteirizacao
