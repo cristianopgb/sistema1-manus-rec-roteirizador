@@ -5,10 +5,18 @@ export class RequestTimeoutError extends Error {
   }
 }
 
+const resolveDefaultTimeoutMs = () => {
+  const rawTimeout = Number(import.meta.env.VITE_REQUEST_TIMEOUT_MS ?? 30000)
+  if (Number.isNaN(rawTimeout)) return 30000
+  return Math.min(Math.max(rawTimeout, 5000), 120000)
+}
+
+export const DEFAULT_REQUEST_TIMEOUT_MS = resolveDefaultTimeoutMs()
+
 export async function withTimeout<T>(
   promise: PromiseLike<T>,
   operation: string,
-  timeoutMs = 15000
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
 ): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
 

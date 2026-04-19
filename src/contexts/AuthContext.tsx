@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/async'
 import { UserProfile, Filial } from '@/types'
 
 interface AuthContextType {
@@ -28,11 +29,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchFilial = useCallback(async (filialId: string): Promise<Filial | null> => {
     try {
-      const { data, error } = await supabase
-        .from('filiais')
-        .select('*')
-        .eq('id', filialId)
-        .single()
+      const { data, error } = await withTimeout(
+        supabase
+          .from('filiais')
+          .select('*')
+          .eq('id', filialId)
+          .single(),
+        'Carregamento da filial ativa'
+      )
       if (error) return null
       return data as Filial
     } catch {
@@ -42,11 +46,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
     try {
-      const { data, error } = await supabase
-        .from('usuarios_perfil')
-        .select('id, email, nome, perfil, filial_id, ativo, created_at')
-        .eq('id', userId)
-        .single()
+      const { data, error } = await withTimeout(
+        supabase
+          .from('usuarios_perfil')
+          .select('id, email, nome, perfil, filial_id, ativo, created_at')
+          .eq('id', userId)
+          .single(),
+        'Carregamento de perfil'
+      )
 
       if (error) {
         console.error('Erro ao buscar perfil:', error)
