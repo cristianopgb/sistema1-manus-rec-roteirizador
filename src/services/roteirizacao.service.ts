@@ -115,7 +115,12 @@ export const roteirizacaoService = {
     // 2. Chamar o motor Python
     let resposta: RespostaMotor
     try {
-      const response = await fetch(buildMotor2Url('/roteirizar'), {
+      const endpoint = buildMotor2Url('/roteirizar')
+      if (import.meta.env.DEV) {
+        console.debug('[Motor2] iniciando chamada', { endpoint, method: 'POST' })
+      }
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -129,6 +134,9 @@ export const roteirizacaoService = {
       resposta = await response.json() as RespostaMotor
     } catch (err) {
       const mensagem = err instanceof Error ? err.message : 'Erro de comunicação com o motor'
+      if (mensagem.includes('VITE_MOTOR_2_URL')) {
+        throw new Error(`Configuração inválida do Motor 2: ${mensagem}`)
+      }
       throw new Error(`Falha ao comunicar com o Motor de Roteirização: ${mensagem}`)
     }
 
@@ -251,7 +259,12 @@ export const roteirizacaoService = {
 
   async verificarMotor(): Promise<boolean> {
     try {
-      const response = await fetch(buildMotor2Url('/health'), {
+      const endpoint = buildMotor2Url('/health')
+      if (import.meta.env.DEV) {
+        console.debug('[Motor2] verificando saúde', { endpoint, method: 'GET' })
+      }
+
+      const response = await fetch(endpoint, {
         signal: AbortSignal.timeout(5000),
       })
       return response.ok
