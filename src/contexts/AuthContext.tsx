@@ -33,7 +33,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
-  reloadProfile: () => Promise<void>
+  reloadProfile: (options?: { force?: boolean }) => Promise<void>
   reloadFilial: () => Promise<void>
   reloadAuthContext: () => Promise<void>
 }
@@ -55,6 +55,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [filialError, setFilialError] = useState<string | null>(null)
   const userRef = useRef<User | null>(null)
   const profileRef = useRef<UserProfile | null>(null)
+  const lastLoadedUserIdRef = useRef<string | null>(null)
+  const lastProfileLoadedAtRef = useRef<number | null>(null)
+  const lastSuccessfulProfileRef = useRef<UserProfile | null>(null)
+  const lastSuccessfulFilialRef = useRef<Filial | null>(null)
+  const profileRequestInFlightRef = useRef<{ userId: string; promise: Promise<void> } | null>(null)
 
   useEffect(() => {
     userRef.current = user
@@ -62,7 +67,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     profileRef.current = profile
+    if (profile) {
+      lastSuccessfulProfileRef.current = profile
+    }
   }, [profile])
+
+  useEffect(() => {
+    if (filialAtiva) {
+      lastSuccessfulFilialRef.current = filialAtiva
+    }
+  }, [filialAtiva])
 
   const fetchFilialById = useCallback(async (filialId: string): Promise<Filial | null> => {
     try {
@@ -172,52 +186,69 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [fetchFilialById])
 
-  const loadProfileAndFilial = useCallback(async (
-    currentUser: User,
-    options?: { showLoading?: boolean; preserveDataOnFailure?: boolean }
-  ) => {
+  const loadProfileForUser = useCallback(async (
+    userId: string,
+    options?: { force?: boolean; showLoading?: boolean }
+  ): Promise<void> => {
+    const force = options?.force ?? false
     const showLoading = options?.showLoading ?? true
-    const preserveDataOnFailure = options?.preserveDataOnFailure ?? false
+    const inFlight = profileRequestInFlightRef.current
 
-    if (showLoading) {
-      setProfileLoading(true)
+    if (!force && inFlight?.userId === userId) {
+      console.log('[AuthContext] Reutilizando carregamento de perfil em andamento', { userId })
+      return inFlight.promise
     }
 
-    try {
-      setProfileError(null)
+    if (!force && lastLoadedUserIdRef.current === userId && profileRef.current?.id === userId) {
+      console.log('[AuthContext] Ignorando reload de perfil para mesmo usuário já carregado', { userId })
+      return
+    }
 
-      const profileData = await fetchProfileByUserId(currentUser.id)
-      if (profileData) {
-        setProfile(profileData)
-      }
-
-      if (!profileData) {
-        setProfileError('Não foi possível carregar o perfil. Tente novamente.')
-        if (!preserveDataOnFailure) {
-          setProfile(null)
-          setFilialAtiva(null)
-          setFilialError(null)
-        }
-        return
-      }
-
-      await loadFilialFromProfile(profileData, { showLoading })
-    } finally {
+    const requestPromise = (async () => {
       if (showLoading) {
-        setProfileLoading(false)
+        setProfileLoading(true)
       }
-    }
+
+      try {
+        setProfileError(null)
+        const profileData = await fetchProfileByUserId(userId)
+
+        if (!profileData) {
+          setProfileError('Não foi possível carregar o perfil. Tente novamente.')
+          console.error('[AuthContext] Falha controlada ao carregar perfil', { userId })
+          return
+        }
+
+        setProfile(profileData)
+        lastLoadedUserIdRef.current = userId
+        lastProfileLoadedAtRef.current = Date.now()
+        lastSuccessfulProfileRef.current = profileData
+
+        await loadFilialFromProfile(profileData, { showLoading })
+      } finally {
+        if (showLoading) {
+          setProfileLoading(false)
+        }
+
+        if (profileRequestInFlightRef.current?.userId === userId) {
+          profileRequestInFlightRef.current = null
+        }
+      }
+    })()
+
+    profileRequestInFlightRef.current = { userId, promise: requestPromise }
+    return requestPromise
   }, [fetchProfileByUserId, loadFilialFromProfile])
 
   const refreshProfile = useCallback(async () => {
     if (!user) return
-    await loadProfileAndFilial(user)
-  }, [user, loadProfileAndFilial])
+    await loadProfileForUser(user.id, { force: true, showLoading: true })
+  }, [user, loadProfileForUser])
 
-  const reloadProfile = useCallback(async () => {
+  const reloadProfile = useCallback(async (options?: { force?: boolean }) => {
     if (!user) return
-    await loadProfileAndFilial(user)
-  }, [user, loadProfileAndFilial])
+    await loadProfileForUser(user.id, { force: options?.force ?? true, showLoading: true })
+  }, [user, loadProfileForUser])
 
   const reloadFilial = useCallback(async () => {
     await loadFilialFromProfile(profile)
@@ -225,8 +256,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const reloadAuthContext = useCallback(async () => {
     if (!user) return
-    await loadProfileAndFilial(user)
-  }, [user, loadProfileAndFilial])
+    await loadProfileForUser(user.id, { force: true, showLoading: true })
+  }, [user, loadProfileForUser])
 
   useEffect(() => {
     let mounted = true
@@ -244,12 +275,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAuthLoading(false)
 
         if (initialSession?.user) {
-          await loadProfileAndFilial(initialSession.user, { showLoading: true })
+          console.log('[AuthContext] Carregando perfil por sessão inicial', {
+            event: 'INITIAL_SESSION',
+            userId: initialSession.user.id,
+          })
+          await loadProfileForUser(initialSession.user.id, { showLoading: true })
         } else {
           setProfile(null)
           setFilialAtiva(null)
           setProfileError(null)
           setFilialError(null)
+          lastLoadedUserIdRef.current = null
+          lastProfileLoadedAtRef.current = null
+          lastSuccessfulProfileRef.current = null
+          lastSuccessfulFilialRef.current = null
+          profileRequestInFlightRef.current = null
         }
       })
       .catch((error) => {
@@ -271,28 +311,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(nextSession?.user ?? null)
         setAuthLoading(false)
 
-        if (!nextSession?.user) {
+        if (authEvent === 'SIGNED_OUT' || !nextSession?.user) {
           setProfile(null)
           setFilialAtiva(null)
           setProfileError(null)
           setFilialError(null)
           setProfileLoading(false)
           setFilialLoading(false)
+          lastLoadedUserIdRef.current = null
+          lastProfileLoadedAtRef.current = null
+          lastSuccessfulProfileRef.current = null
+          lastSuccessfulFilialRef.current = null
+          profileRequestInFlightRef.current = null
           return
         }
 
-        if (authEvent === 'SIGNED_IN' || authEvent === 'USER_UPDATED' || userChanged) {
-          await loadProfileAndFilial(nextSession.user, { showLoading: true })
-          return
-        }
-
-        if (authEvent === 'TOKEN_REFRESHED' || authEvent === 'INITIAL_SESSION' || authEvent === 'PASSWORD_RECOVERY') {
-          if (!profileRef.current || userChanged) {
-            await loadProfileAndFilial(nextSession.user, {
-              showLoading: false,
-              preserveDataOnFailure: true,
+        if (authEvent === 'TOKEN_REFRESHED') {
+          if (profileRef.current?.id === nextUserId) {
+            console.log('[AuthContext] Ignorando reload de perfil para mesmo usuário após refresh de token', {
+              userId: nextUserId,
             })
           }
+          return
+        }
+
+        if (authEvent === 'INITIAL_SESSION') {
+          if (!profileRef.current || lastLoadedUserIdRef.current !== nextUserId) {
+            console.log('[AuthContext] Carregando perfil por mudança real de sessão', {
+              event: authEvent,
+              userId: nextUserId,
+            })
+            await loadProfileForUser(nextSession.user.id, { showLoading: false })
+          }
+          return
+        }
+
+        if (authEvent === 'SIGNED_IN') {
+          const shouldLoadProfile = userChanged || !profileRef.current || lastLoadedUserIdRef.current !== nextUserId
+          if (!shouldLoadProfile) {
+            console.log('[AuthContext] SIGNED_IN ignorado para usuário já carregado', {
+              userId: nextUserId,
+            })
+            return
+          }
+
+          console.log('[AuthContext] Carregando perfil por mudança real de sessão', {
+            event: authEvent,
+            userId: nextUserId,
+          })
+          await loadProfileForUser(nextSession.user.id, { showLoading: true })
+          return
+        }
+
+        if (userChanged) {
+          console.log('[AuthContext] Carregando perfil por troca de usuário', {
+            event: authEvent,
+            userId: nextUserId,
+          })
+          await loadProfileForUser(nextSession.user.id, { force: true, showLoading: true })
         }
       }
     )
@@ -301,7 +377,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       mounted = false
       subscription.unsubscribe()
     }
-  }, [loadProfileAndFilial])
+  }, [loadProfileForUser])
 
   const signIn = async (email: string, password: string) => {
     try {
@@ -319,6 +395,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setFilialAtiva(null)
     setProfileError(null)
     setFilialError(null)
+    lastLoadedUserIdRef.current = null
+    lastProfileLoadedAtRef.current = null
+    lastSuccessfulProfileRef.current = null
+    lastSuccessfulFilialRef.current = null
+    profileRequestInFlightRef.current = null
   }
 
   const isMaster = profile?.perfil === 'master'
