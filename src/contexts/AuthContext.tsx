@@ -134,40 +134,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loadFilialFromProfile = useCallback(async (profileData: UserProfile | null, options?: { showLoading?: boolean }) => {
     const showLoading = options?.showLoading ?? true
 
-    if (!profileData) {
-      setFilialAtiva(null)
-      setFilialError(null)
-      return
-    }
-
-    if (!profileData.filial_id) {
-      setFilialAtiva(null)
-      if (profileData.perfil === 'master') {
-        setFilialError(null)
-      } else {
-        setFilialError('Perfil sem filial vinculada. Entre em contato com o administrador.')
-      }
-      return
-    }
-
     if (showLoading) {
       setFilialLoading(true)
     }
-    setFilialError(null)
 
-    const filial = await fetchFilialById(profileData.filial_id)
-    if (!filial) {
-      setFilialAtiva(null)
-      setFilialError('Não foi possível carregar a filial do perfil.')
+    try {
+      if (!profileData) {
+        setFilialAtiva(null)
+        setFilialError(null)
+        return
+      }
+
+      if (!profileData.filial_id) {
+        setFilialAtiva(null)
+        if (profileData.perfil === 'master') {
+          setFilialError(null)
+        } else {
+          setFilialError('Perfil sem filial vinculada. Entre em contato com o administrador.')
+        }
+        return
+      }
+
+      setFilialError(null)
+
+      const filial = await fetchFilialById(profileData.filial_id)
+      if (!filial) {
+        setFilialAtiva(null)
+        setFilialError('Não foi possível carregar a filial do perfil.')
+        return
+      }
+
+      setFilialAtiva(filial)
+    } finally {
       if (showLoading) {
         setFilialLoading(false)
       }
-      return
-    }
-
-    setFilialAtiva(filial)
-    if (showLoading) {
-      setFilialLoading(false)
     }
   }, [fetchFilialById])
 
@@ -181,29 +182,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (showLoading) {
       setProfileLoading(true)
     }
-    setProfileError(null)
 
-    const profileData = await fetchProfileByUserId(currentUser.id)
-    if (profileData) {
-      setProfile(profileData)
-    }
+    try {
+      setProfileError(null)
 
-    if (!profileData) {
-      setProfileError('Não foi possível carregar o perfil. Tente novamente.')
-      if (!preserveDataOnFailure) {
-        setProfile(null)
-        setFilialAtiva(null)
-        setFilialError(null)
+      const profileData = await fetchProfileByUserId(currentUser.id)
+      if (profileData) {
+        setProfile(profileData)
       }
+
+      if (!profileData) {
+        setProfileError('Não foi possível carregar o perfil. Tente novamente.')
+        if (!preserveDataOnFailure) {
+          setProfile(null)
+          setFilialAtiva(null)
+          setFilialError(null)
+        }
+        return
+      }
+
+      await loadFilialFromProfile(profileData, { showLoading })
+    } finally {
       if (showLoading) {
         setProfileLoading(false)
       }
-      return
-    }
-
-    await loadFilialFromProfile(profileData, { showLoading })
-    if (showLoading) {
-      setProfileLoading(false)
     }
   }, [fetchProfileByUserId, loadFilialFromProfile])
 
