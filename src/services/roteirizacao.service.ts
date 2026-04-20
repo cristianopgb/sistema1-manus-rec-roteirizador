@@ -9,60 +9,80 @@ import {
 import {
   PayloadMotor, RespostaMotor, ManifestoComFrete,
   RodadaRoteirizacao, FiltrosRoteirizacao, CarteiraCarga,
-  Filial, Veiculo
+  Filial, FiltrosCarteira, ConfiguracaoFrotaItem
 } from '@/types'
 
-export interface CarteiraFiltros {
-  upload_id?: string
-  tomad?: string
-  destin?: string
-  cidade?: string
-  uf?: string
-  mesoregiao?: string
-  sub_regiao?: string
-  status_validacao?: string
+const CAMPOS_MULTISELECT: Array<keyof Pick<FiltrosCarteira, 'filial_r' | 'uf' | 'destin' | 'cidade' | 'tomad' | 'mesoregiao' | 'prioridade' | 'restricao_veiculo'>> = [
+  'filial_r',
+  'uf',
+  'destin',
+  'cidade',
+  'tomad',
+  'mesoregiao',
+  'prioridade',
+  'restricao_veiculo',
+]
+
+const CAMPOS_DATA_RANGE: Array<{ de: keyof FiltrosCarteira; ate: keyof FiltrosCarteira; coluna: string }> = [
+  { de: 'agendam_de', ate: 'agendam_ate', coluna: 'agendam' },
+  { de: 'dle_de', ate: 'dle_ate', coluna: 'dle' },
+  { de: 'data_des_de', ate: 'data_des_ate', coluna: 'data_des' },
+  { de: 'data_nf_de', ate: 'data_nf_ate', coluna: 'data_nf' },
+]
+
+const normalizarCarteiraItem = (item: any): CarteiraCarga => {
+  const { id, upload_id, status_validacao, erro_validacao, created_at, dados_originais_json, ...rest } = item
+  return ({
+    ...rest,
+    _carteira_item_id: id,
+    _upload_id: upload_id,
+    _status_validacao: status_validacao,
+    _erro_validacao: erro_validacao,
+    _created_at: created_at,
+    _dados_originais: dados_originais_json,
+  }) as CarteiraCarga
 }
 
-const aplicarFiltrosCarteira = (query: any, filtros?: CarteiraFiltros) => {
-  let filtered = query.eq('status_validacao', filtros?.status_validacao || 'valida')
+const aplicarFiltrosCarteira = (query: any, filtros?: FiltrosCarteira) => {
+  let filtered = query
+  const filtrosAtivos = filtros
 
-  if (filtros?.tomad) filtered = filtered.eq('tomad', filtros.tomad)
-  if (filtros?.destin) filtered = filtered.eq('destin', filtros.destin)
-  if (filtros?.cidade) filtered = filtered.eq('cidade', filtros.cidade)
-  if (filtros?.uf) filtered = filtered.eq('uf', filtros.uf)
-  if (filtros?.mesoregiao) filtered = filtered.eq('mesoregiao', filtros.mesoregiao)
-  if (filtros?.sub_regiao) filtered = filtered.eq('sub_regiao', filtros.sub_regiao)
+  if (!filtrosAtivos) return filtered
+
+  for (const campo of CAMPOS_MULTISELECT) {
+    const valores = filtrosAtivos[campo]
+    if (Array.isArray(valores) && valores.length > 0) {
+      filtered = filtered.in(campo, valores)
+    }
+  }
+
+  if (filtrosAtivos.carro_dedicado === 'sim') {
+    filtered = filtered.eq('carro_dedicado', true)
+  } else if (filtrosAtivos.carro_dedicado === 'nao') {
+    filtered = filtered.eq('carro_dedicado', false)
+  }
+
+  for (const { de, ate, coluna } of CAMPOS_DATA_RANGE) {
+    if (filtrosAtivos[de]) filtered = filtered.gte(coluna, filtrosAtivos[de])
+    if (filtrosAtivos[ate]) filtered = filtered.lte(coluna, filtrosAtivos[ate])
+  }
 
   return filtered
 }
 
 export const roteirizacaoService = {
-  async buscarCarteiraPorUploadId(uploadId: string, filtros?: Omit<CarteiraFiltros, 'upload_id'>): Promise<CarteiraCarga[]> {
-    const query = supabase
+  async buscarCarteiraFiltrada(uploadId: string, filtros?: FiltrosCarteira): Promise<CarteiraCarga[]> {
+    const baseQuery = supabase
       .from('carteira_itens')
       .select('*')
       .eq('upload_id', uploadId)
+      .eq('status_validacao', 'valida')
       .order('linha_numero', { ascending: true })
 
-    const { data, error } = await aplicarFiltrosCarteira(query, filtros)
+    const { data, error } = await aplicarFiltrosCarteira(baseQuery, filtros)
     if (error) throw error
 
-    return (data || []).map((item: any) => {
-      const { id, upload_id, status_validacao, erro_validacao, created_at, dados_originais_json, ...rest } = item
-      return ({
-      ...rest,
-      _carteira_item_id: id,
-      _upload_id: upload_id,
-      _status_validacao: status_validacao,
-      _erro_validacao: erro_validacao,
-      _created_at: created_at,
-      _dados_originais: dados_originais_json,
-      })
-    }) as CarteiraCarga[]
-  },
-
-  async filtrarCarteiraItens(uploadId: string, filtros?: Omit<CarteiraFiltros, 'upload_id'>): Promise<CarteiraCarga[]> {
-    return this.buscarCarteiraPorUploadId(uploadId, filtros)
+    return (data || []).map(normalizarCarteiraItem)
   },
 
   /**
@@ -70,50 +90,31 @@ export const roteirizacaoService = {
    */
   async roteirizar(
     filial: Filial,
-    veiculos: Veiculo[],
     uploadId: string,
     filtros: FiltrosRoteirizacao,
     usuarioId: string,
-    filtrosCarteira?: Omit<CarteiraFiltros, 'upload_id'>
+    carteiraFiltrada: CarteiraCarga[],
+    configuracaoFrota: ConfiguracaoFrotaItem[]
   ): Promise<{ rodada: RodadaRoteirizacao; manifestos: ManifestoComFrete[] }> {
     const inicio = Date.now()
-    const carteira = await this.buscarCarteiraPorUploadId(uploadId, filtrosCarteira)
+    const carteira = carteiraFiltrada
 
     if (!carteira.length) {
       throw new Error('Nenhum item válido encontrado para este upload.')
     }
 
+    const rodadaId = crypto.randomUUID()
+
     // 1. Montar payload para o motor
     const payload: PayloadMotor = {
-      filial: {
-        id: filial.id,
-        codigo: filial.codigo,
-        nome: filial.nome,
-        cidade: filial.cidade,
-        uf: filial.uf,
-        latitude: filial.latitude,
-        longitude: filial.longitude,
-      },
-      parametros: {
-        data_base_roteirizacao: filtros.data_base,
-        tipo_roteirizacao: filtros.tipo_roteirizacao,
-        filial_id: filial.id,
-        filial_nome: filial.nome,
-      },
-      veiculos: veiculos.map((v) => ({
-        id: v.id,
-        codigo: v.codigo || `VEIC-${v.id.slice(0, 8).toUpperCase()}`,
-        placa: v.placa || 'N/I',
-        tipo: v.tipo,
-        capacidade_peso_kg: v.capacidade_peso_kg,
-        capacidade_volume_m3: v.capacidade_volume_m3,
-        num_eixos: v.num_eixos,
-        max_km_distancia: v.max_km_distancia,
-        max_entregas: v.max_entregas,
-        ocupacao_minima_perc: v.ocupacao_minima_perc,
-        ocupacao_maxima_perc: v.ocupacao_maxima_perc,
-        motorista: v.motorista || undefined,
-      })),
+      rodada_id: rodadaId,
+      upload_id: uploadId,
+      usuario_id: usuarioId,
+      filial_id: filial.id,
+      data_base_roteirizacao: filtros.data_base,
+      tipo_roteirizacao: filtros.tipo_roteirizacao,
+      filtros_aplicados: filtros.filtros_aplicados,
+      configuracao_frota: filtros.tipo_roteirizacao === 'frota' ? configuracaoFrota : [],
       carteira,
     }
 
@@ -204,6 +205,7 @@ export const roteirizacaoService = {
     const { data: rodadaData, error: rodadaError } = await supabase
       .from('rodadas_roteirizacao')
       .insert({
+        id: rodadaId,
         filial_id: filial.id,
         usuario_id: usuarioId,
         upload_id: uploadId,
@@ -227,7 +229,7 @@ export const roteirizacaoService = {
     }
 
     const rodada: RodadaRoteirizacao = {
-      id: rodadaData?.id || crypto.randomUUID(),
+      id: rodadaData?.id || rodadaId,
       filial_id: filial.id,
       filial_nome: filial.nome,
       usuario_id: usuarioId,

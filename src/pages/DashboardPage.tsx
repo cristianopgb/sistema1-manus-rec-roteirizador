@@ -274,7 +274,7 @@ export function DashboardPage() {
                         {isMaster && <td className="text-gray-600">{r.filial_nome}</td>}
                         <td className="text-gray-600">{r.usuario_nome || '—'}</td>
                         <td>
-                          <span className="badge-gray text-xs">{r.tipo_roteirizacao || 'padrao'}</span>
+                          <span className="badge-gray text-xs">{r.tipo_roteirizacao || 'carteira'}</span>
                         </td>
                         <td className="text-right font-mono">{r.total_cargas_entrada?.toLocaleString('pt-BR')}</td>
                         <td className="text-right font-mono font-semibold text-brand-700">
