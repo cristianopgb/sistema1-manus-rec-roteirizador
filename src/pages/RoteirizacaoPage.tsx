@@ -68,6 +68,8 @@ const TABELA_COLUNAS_PADRAO = [
   { key: 'uf', label: 'UF' },
 ]
 
+const COLUNAS_TABELA_ORDENADAS = TABELA_COLUNAS_PADRAO.map((coluna) => coluna.key)
+
 const formatColumnLabel = (coluna: string) => coluna
   .replace(/_/g, ' ')
   .replace(/\s+/g, ' ')
@@ -118,23 +120,26 @@ export function RoteirizacaoPage() {
     return primeira ? Object.keys(primeira).filter((k) => !k.startsWith('_')).length : upload.totalColunas
   }, [carteiraFiltrada, upload.totalColunas])
   const colunasCarteira = useMemo(() => {
-    const detectadas = upload.colunasDetectadas
-      .map((c) => String(c ?? '').trim())
-      .filter((c) => c.length > 0)
+    const linhas = [...previewRows, ...carteiraFiltrada] as Array<Record<string, unknown>>
+    const chavesComConteudo = new Set<string>()
 
-    if (detectadas.length > 0) {
-      return detectadas.map((key) => ({ key, label: formatColumnLabel(key) }))
-    }
+    linhas.forEach((linha) => {
+      Object.entries(linha ?? {}).forEach(([key, value]) => {
+        if (key.startsWith('_')) return
+        if (value === null || value === undefined) return
+        if (String(value).trim() === '') return
+        chavesComConteudo.add(key)
+      })
+    })
 
-    const primeiraLinha = (carteiraFiltrada[0] ?? previewRows[0]) as Record<string, unknown> | undefined
-    if (primeiraLinha) {
-      return Object.keys(primeiraLinha)
-        .filter((key) => !key.startsWith('_'))
-        .map((key) => ({ key, label: formatColumnLabel(key) }))
-    }
+    const ordenadas = COLUNAS_TABELA_ORDENADAS.filter((key) => chavesComConteudo.has(key))
+    const extras = Array.from(chavesComConteudo).filter((key) => !COLUNAS_TABELA_ORDENADAS.includes(key))
+    const chavesFinais = [...ordenadas, ...extras]
 
-    return TABELA_COLUNAS_PADRAO
-  }, [upload.colunasDetectadas, carteiraFiltrada, previewRows])
+    if (!chavesFinais.length) return TABELA_COLUNAS_PADRAO
+
+    return chavesFinais.map((key) => ({ key, label: formatColumnLabel(key) }))
+  }, [carteiraFiltrada, previewRows])
 
   const carregarHistorico = useCallback(async () => {
     if (!filialOperacionalId && !isMaster) return
@@ -445,7 +450,7 @@ export function RoteirizacaoPage() {
           maxHeightClassName="max-h-[55vh]"
         />
 
-        <div className="flex justify-end gap-3"><button className="btn-secondary" onClick={reiniciar}>Cancelar</button><button className="btn-primary" onClick={confirmarPreview}><CheckCircle size={16} /> Confirmar e Configurar Filtros</button></div>
+        <div className="flex justify-end gap-3"><button className="btn-secondary" onClick={reiniciar}>Cancelar</button><button className="btn-primary" onClick={confirmarPreview}><CheckCircle size={16} /> Ir para Roteirização</button></div>
       </div>
     )
   }
@@ -463,31 +468,37 @@ export function RoteirizacaoPage() {
 
         <div className="space-y-6">
           <div className="card p-6 space-y-5">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {isMaster && (
-                <div>
-                  <label className="label">Filial operacional *</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="label">Filial operacional *</label>
+                {isMaster ? (
                   <select className="input" value={filialSelecionadaMaster} onChange={(e) => setFilialSelecionadaMaster(e.target.value)}>
                     <option value="">Selecione a filial...</option>
                     {filiaisMaster.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
                   </select>
-                </div>
-              )}
+                ) : (
+                  <input className="input" value={filialOperacional?.nome || ''} readOnly />
+                )}
+              </div>
               <div>
                 <label className="label">Data Base da Roteirização *</label>
                 <input type="datetime-local" className="input" value={filtros.data_base} onChange={(e) => setFiltros({ ...filtros, data_base: e.target.value })} />
               </div>
               <div>
                 <label className="label">Tipo de Roteirização *</label>
-                <div className="space-y-3 mt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
                   {TIPOS_ROTEIRIZACAO.map((tipo) => (
-                    <label key={tipo.value} className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${filtros.tipo_roteirizacao === tipo.value ? 'border-brand-500 bg-brand-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                      <input type="radio" name="tipo_roteirizacao" value={tipo.value} checked={filtros.tipo_roteirizacao === tipo.value} onChange={() => setFiltros({ ...filtros, tipo_roteirizacao: tipo.value })} className="mt-0.5" />
-                      <div><div className="font-semibold">{tipo.label}</div><div className="text-sm text-gray-500">{tipo.desc}</div></div>
+                    <label key={tipo.value} className={`flex items-start gap-3 p-4 rounded-xl border-2 min-h-[96px] cursor-pointer transition-all ${filtros.tipo_roteirizacao === tipo.value ? 'border-brand-500 bg-brand-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                      <input type="radio" name="tipo_roteirizacao" value={tipo.value} checked={filtros.tipo_roteirizacao === tipo.value} onChange={() => setFiltros({ ...filtros, tipo_roteirizacao: tipo.value })} className="mt-0.5 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="font-semibold leading-5">{tipo.label}</div>
+                        <div className="text-sm text-gray-500 leading-5 mt-1">{tipo.desc}</div>
+                      </div>
                     </label>
                   ))}
                 </div>
               </div>
+              <div className="hidden md:block" aria-hidden />
             </div>
           </div>
 

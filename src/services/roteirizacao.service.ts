@@ -70,6 +70,15 @@ const aplicarFiltrosCarteira = (query: any, filtros?: FiltrosCarteira) => {
   return filtered
 }
 
+const isLinhaCarteiraSemConteudo = (row: Record<string, unknown>): boolean => {
+  const campos = Object.entries(row).filter(([key]) => !key.startsWith('_') && key !== 'linha_numero')
+  if (!campos.length) return true
+  return campos.every(([, value]) => {
+    if (value === null || value === undefined) return true
+    return String(value).trim() === ''
+  })
+}
+
 export const roteirizacaoService = {
   async buscarCarteiraFiltrada(uploadId: string, filtros?: FiltrosCarteira): Promise<CarteiraCarga[]> {
     const baseQuery = supabase
@@ -82,7 +91,9 @@ export const roteirizacaoService = {
     const { data, error } = await aplicarFiltrosCarteira(baseQuery, filtros)
     if (error) throw error
 
-    return (data || []).map(normalizarCarteiraItem)
+    return (data || [])
+      .map(normalizarCarteiraItem)
+      .filter((item: CarteiraCarga) => !isLinhaCarteiraSemConteudo(item as Record<string, unknown>))
   },
 
   /**

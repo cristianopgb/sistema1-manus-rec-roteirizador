@@ -136,6 +136,15 @@ const isRowFullyEmpty = (row: Record<string, unknown>): boolean =>
     return String(value).trim() === ''
   })
 
+const isLinhaCarteiraSemConteudo = (row: Record<string, unknown>): boolean => {
+  const campos = Object.entries(row).filter(([key]) => !key.startsWith('_') && key !== 'linha_numero')
+  if (!campos.length) return true
+  return campos.every(([, value]) => {
+    if (value === null || value === undefined) return true
+    return String(value).trim() === ''
+  })
+}
+
 const parseNumeric = (value: unknown): number | null => {
   if (value === null || value === undefined) return null
   const text = String(value).trim()
@@ -413,28 +422,32 @@ export const carteiraUploadService = {
   },
 
   async buscarPreviewUpload(uploadId: string, limite = 5): Promise<CarteiraCarga[]> {
+    const limiteConsulta = Math.max(limite * 5, limite)
     const { data, error } = await supabase
       .from('carteira_itens')
       .select('*')
       .eq('upload_id', uploadId)
       .eq('status_validacao', 'valida')
       .order('linha_numero', { ascending: true })
-      .limit(limite)
+      .limit(limiteConsulta)
 
     if (error) throw error
 
-    return (data ?? []).map((row) => {
-      const { id, upload_id, status_validacao, erro_validacao, created_at, dados_originais_json, ...rest } = row
-      return {
-        ...rest,
-        _carteira_item_id: id,
-        _upload_id: upload_id,
-        _status_validacao: status_validacao,
-        _erro_validacao: erro_validacao,
-        _created_at: created_at,
-        _dados_originais: dados_originais_json,
-      } as CarteiraCarga
-    })
+    return (data ?? [])
+      .map((row) => {
+        const { id, upload_id, status_validacao, erro_validacao, created_at, dados_originais_json, ...rest } = row
+        return {
+          ...rest,
+          _carteira_item_id: id,
+          _upload_id: upload_id,
+          _status_validacao: status_validacao,
+          _erro_validacao: erro_validacao,
+          _created_at: created_at,
+          _dados_originais: dados_originais_json,
+        } as CarteiraCarga
+      })
+      .filter((row) => !isLinhaCarteiraSemConteudo(row as Record<string, unknown>))
+      .slice(0, limite)
   },
 
   expectedRawColumns: DATASET_COLUNAS_BRUTAS,
