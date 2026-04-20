@@ -43,7 +43,7 @@ const FILTROS_CARTEIRA_INICIAIS: FiltrosCarteira = {
   agendam_de: '', agendam_ate: '', dle_de: '', dle_ate: '', data_des_de: '', data_des_ate: '', data_nf_de: '', data_nf_ate: '',
 }
 
-const TABELA_COLUNAS = [
+const TABELA_COLUNAS_PADRAO = [
   { key: 'linha_numero', label: 'Linha' },
   { key: 'filial_r', label: 'Filial R' },
   { key: 'romane', label: 'Romane' },
@@ -67,6 +67,12 @@ const TABELA_COLUNAS = [
   { key: 'cidade', label: 'Cidade' },
   { key: 'uf', label: 'UF' },
 ]
+
+const formatColumnLabel = (coluna: string) => coluna
+  .replace(/_/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .replace(/\b\w/g, (l) => l.toUpperCase())
 
 export function RoteirizacaoPage() {
   const { user, filialAtiva, isMaster, profileLoading, profileError, filialLoading, filialError, reloadAuthContext } = useAuth()
@@ -111,7 +117,24 @@ export function RoteirizacaoPage() {
     const primeira = carteiraFiltrada[0] as Record<string, unknown> | undefined
     return primeira ? Object.keys(primeira).filter((k) => !k.startsWith('_')).length : upload.totalColunas
   }, [carteiraFiltrada, upload.totalColunas])
-  const previewResumo = useMemo(() => carteiraFiltrada.slice(0, 5), [carteiraFiltrada])
+  const colunasCarteira = useMemo(() => {
+    const detectadas = upload.colunasDetectadas
+      .map((c) => String(c ?? '').trim())
+      .filter((c) => c.length > 0)
+
+    if (detectadas.length > 0) {
+      return detectadas.map((key) => ({ key, label: formatColumnLabel(key) }))
+    }
+
+    const primeiraLinha = (carteiraFiltrada[0] ?? previewRows[0]) as Record<string, unknown> | undefined
+    if (primeiraLinha) {
+      return Object.keys(primeiraLinha)
+        .filter((key) => !key.startsWith('_'))
+        .map((key) => ({ key, label: formatColumnLabel(key) }))
+    }
+
+    return TABELA_COLUNAS_PADRAO
+  }, [upload.colunasDetectadas, carteiraFiltrada, previewRows])
 
   const carregarHistorico = useCallback(async () => {
     if (!filialOperacionalId && !isMaster) return
@@ -290,6 +313,7 @@ export function RoteirizacaoPage() {
 
   const confirmarPreview = () => {
     if (upload.totalLinhas === 0 || !upload.uploadId) return toast.error('Arquivo sem dados')
+    setFiltrosExpandidos(true)
     setEtapa('filtros')
   }
 
@@ -413,9 +437,13 @@ export function RoteirizacaoPage() {
           <div className="card p-4 text-center"><CheckCircle size={24} className="mx-auto text-green-600 mb-2" /><div className="text-sm font-bold truncate">{upload.nomeArquivo || upload.arquivo?.name}</div><div className="text-sm text-gray-500">Arquivo</div></div>
         </div>
 
-        <CarteiraFiltersPanel filtros={filtrosCarteira} opcoesFiltro={opcoesFiltro} expanded={filtrosExpandidos} onToggleExpanded={() => setFiltrosExpandidos((p) => !p)} onChange={setFiltrosCarteira} onClear={limparFiltros} onApply={aplicarFiltros} />
-
-        <CarteiraPreviewTable rows={previewRows} columns={TABELA_COLUNAS} title="Primeiras linhas reais da carteira" total={upload.totalLinhas} />
+        <CarteiraPreviewTable
+          rows={previewRows}
+          columns={colunasCarteira}
+          title="Primeiras linhas reais da carteira"
+          total={upload.totalLinhas}
+          maxHeightClassName="max-h-[55vh]"
+        />
 
         <div className="flex justify-end gap-3"><button className="btn-secondary" onClick={reiniciar}>Cancelar</button><button className="btn-primary" onClick={confirmarPreview}><CheckCircle size={16} /> Confirmar e Configurar Filtros</button></div>
       </div>
@@ -433,9 +461,9 @@ export function RoteirizacaoPage() {
           <button className="btn-ghost" onClick={() => setEtapa('preview')}>Voltar</button>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          <div className="xl:col-span-2 space-y-6">
-            <div className="card p-6 space-y-5">
+        <div className="space-y-6">
+          <div className="card p-6 space-y-5">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               {isMaster && (
                 <div>
                   <label className="label">Filial operacional *</label>
@@ -449,7 +477,6 @@ export function RoteirizacaoPage() {
                 <label className="label">Data Base da Roteirização *</label>
                 <input type="datetime-local" className="input" value={filtros.data_base} onChange={(e) => setFiltros({ ...filtros, data_base: e.target.value })} />
               </div>
-
               <div>
                 <label className="label">Tipo de Roteirização *</label>
                 <div className="space-y-3 mt-2">
@@ -462,30 +489,28 @@ export function RoteirizacaoPage() {
                 </div>
               </div>
             </div>
+          </div>
 
-            <CarteiraFiltersPanel filtros={filtrosCarteira} opcoesFiltro={opcoesFiltro} expanded={filtrosExpandidos} onToggleExpanded={() => setFiltrosExpandidos((p) => !p)} onChange={setFiltrosCarteira} onClear={limparFiltros} onApply={aplicarFiltros} />
+          <CarteiraFiltersPanel filtros={filtrosCarteira} opcoesFiltro={opcoesFiltro} expanded={filtrosExpandidos} onToggleExpanded={() => setFiltrosExpandidos((p) => !p)} onChange={setFiltrosCarteira} onClear={limparFiltros} onApply={aplicarFiltros} />
 
-            {filtros.tipo_roteirizacao === 'frota' && (
-              <div className="card p-6 space-y-3">
-                <h3 className="font-semibold text-gray-900">Configuração de Frota por Perfil</h3>
-                {frotaLoading && <p className="text-sm text-gray-500">Carregando perfis...</p>}
-                {!frotaLoading && perfisFrota.length === 0 && <p className="text-sm text-amber-700">Nenhum perfil de veículo ativo encontrado para a filial.</p>}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {perfisFrota.map((perfil) => (
-                    <div key={perfil} className="flex items-center justify-between border rounded-lg p-3"><span className="font-medium">{perfil}</span><input type="number" min={0} className="input w-28" value={quantidadePorPerfil[perfil] ?? 0} onChange={(e) => setQuantidadePorPerfil((prev) => ({ ...prev, [perfil]: Number(e.target.value || 0) }))} /></div>
-                  ))}
-                </div>
+          {filtros.tipo_roteirizacao === 'frota' && (
+            <div className="card p-6 space-y-3">
+              <h3 className="font-semibold text-gray-900">Configuração de Frota por Perfil</h3>
+              {frotaLoading && <p className="text-sm text-gray-500">Carregando perfis...</p>}
+              {!frotaLoading && perfisFrota.length === 0 && <p className="text-sm text-amber-700">Nenhum perfil de veículo ativo encontrado para a filial.</p>}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {perfisFrota.map((perfil) => (
+                  <div key={perfil} className="flex items-center justify-between border rounded-lg p-3"><span className="font-medium">{perfil}</span><input type="number" min={0} className="input w-28" value={quantidadePorPerfil[perfil] ?? 0} onChange={(e) => setQuantidadePorPerfil((prev) => ({ ...prev, [perfil]: Number(e.target.value || 0) }))} /></div>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
-            <CarteiraPreviewTable rows={carteiraFiltrada.slice(0, 60)} columns={TABELA_COLUNAS} title="Carteira filtrada" total={carteiraFiltrada.length} />
-          </div>
+          {resumoErro && <div className="card p-4 text-sm text-red-600">{resumoErro}</div>}
+          {resumoLoading && <div className="card p-4 text-sm text-gray-500">Atualizando resumo...</div>}
+          <RealtimeSummaryCard totalValidas={totalValidas} totalFiltradas={carteiraFiltrada.length} arquivo={upload.nomeArquivo || upload.arquivo?.name || ''} totalColunas={totalColunasResumo} filial={filialOperacional?.nome || ''} tipo={filtros.tipo_roteirizacao} />
 
-          <div className="space-y-4">
-            {resumoErro && <div className="card p-4 text-sm text-red-600">{resumoErro}</div>}
-            {resumoLoading && <div className="card p-4 text-sm text-gray-500">Atualizando resumo...</div>}
-            <RealtimeSummaryCard totalValidas={totalValidas} totalFiltradas={carteiraFiltrada.length} arquivo={upload.nomeArquivo || upload.arquivo?.name || ''} totalColunas={totalColunasResumo} filial={filialOperacional?.nome || ''} tipo={filtros.tipo_roteirizacao} previewRows={previewResumo} />
-          </div>
+          <CarteiraPreviewTable rows={carteiraFiltrada} columns={colunasCarteira} title="Carteira filtrada" total={carteiraFiltrada.length} maxHeightClassName="max-h-[65vh]" />
         </div>
 
         <div className="flex justify-end gap-3 mt-6">
