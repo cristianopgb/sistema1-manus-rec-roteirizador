@@ -28,8 +28,8 @@ export function TabelaAnttPage() {
 
   const abrirEditar = (item: TabelaAntt) => {
     setEditando(item)
-    setFormDeslocamento(String(item.coeficiente_deslocamento))
-    setFormCargaDescarga(String(item.coeficiente_carga_descarga))
+    setFormDeslocamento(String(item.coef_ccd))
+    setFormCargaDescarga(String(item.coef_cc))
   }
 
   const salvar = async () => {
@@ -37,8 +37,8 @@ export function TabelaAnttPage() {
     setSalvando(true)
     try {
       await anttService.atualizar(editando.id, {
-        coeficiente_deslocamento: parseFloat(formDeslocamento),
-        coeficiente_carga_descarga: parseFloat(formCargaDescarga),
+        coef_ccd: parseFloat(formDeslocamento),
+        coef_cc: parseFloat(formCargaDescarga),
       })
       toast.success('Coeficiente atualizado')
       setEditando(null)
@@ -51,7 +51,7 @@ export function TabelaAnttPage() {
   }
 
   // Agrupar por tipo de carga
-  const tiposCarga = [...new Set(tabela.map((t) => t.tipo_carga_id))].sort((a, b) => a - b)
+  const tiposCarga = [...new Set(tabela.map((t) => t.codigo_tipo))].sort((a, b) => a - b)
 
   return (
     <div className="fade-in">
@@ -83,8 +83,8 @@ export function TabelaAnttPage() {
       ) : (
         <div className="space-y-6">
           {tiposCarga.map((tipoCargaId) => {
-            const itens = tabela.filter((t) => t.tipo_carga_id === tipoCargaId)
-            const nomeTipo = TIPOS_CARGA_ANTT[tipoCargaId] || `Tipo ${tipoCargaId}`
+            const itens = tabela.filter((t) => t.codigo_tipo === tipoCargaId)
+            const nomeTipo = itens[0]?.nome_tipo || TIPOS_CARGA_ANTT[tipoCargaId] || `Tipo ${tipoCargaId}`
 
             return (
               <div key={tipoCargaId} className="card">
@@ -128,7 +128,7 @@ export function TabelaAnttPage() {
                                 />
                               ) : (
                                 <span className="font-mono text-emerald-700 font-semibold">
-                                  R$ {item.coeficiente_deslocamento.toFixed(4)}
+                                  R$ {item.coef_ccd.toFixed(4)}
                                 </span>
                               )}
                             </td>
@@ -143,7 +143,7 @@ export function TabelaAnttPage() {
                                 />
                               ) : (
                                 <span className="font-mono text-blue-700 font-semibold">
-                                  R$ {item.coeficiente_carga_descarga.toFixed(2)}
+                                  R$ {item.coef_cc.toFixed(2)}
                                 </span>
                               )}
                             </td>
