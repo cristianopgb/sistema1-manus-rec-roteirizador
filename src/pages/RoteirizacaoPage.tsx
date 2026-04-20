@@ -2,14 +2,22 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import {
   Upload, FileSpreadsheet, Play, Loader2,
   CheckCircle, XCircle, AlertTriangle,
-  RotateCcw, Package, Truck, MapPin, Clock
+  RotateCcw, Package, Truck, MapPin, Clock, FilterX
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUploadCarteira } from '@/hooks/useUploadCarteira'
 import { roteirizacaoService } from '@/services/roteirizacao.service'
 import { veiculosService } from '@/services/veiculos.service'
 import { filiaisService } from '@/services/filiais.service'
-import { ManifestoComFrete, RodadaRoteirizacao, FiltrosRoteirizacao, Filial } from '@/types'
+import {
+  ManifestoComFrete,
+  RodadaRoteirizacao,
+  FiltrosRoteirizacao,
+  Filial,
+  FiltrosCarteira,
+  CarteiraCarga,
+  ConfiguracaoFrotaItem,
+} from '@/types'
 import { ManifestoCard } from '@/components/roteirizacao/ManifestoCard'
 import { EncadeamentoPanel } from '@/components/roteirizacao/EncadeamentoPanel'
 import { NaoRoteirizadosPanel } from '@/components/roteirizacao/NaoRoteirizadosPanel'
@@ -18,11 +26,43 @@ import toast from 'react-hot-toast'
 
 type Etapa = 'upload' | 'preview' | 'filtros' | 'processando' | 'resultado'
 
-const TIPOS_ROTEIRIZACAO = [
-  { value: 'padrao', label: 'Padrão', desc: 'Roteirização completa com todos os algoritmos' },
-  { value: 'expressa', label: 'Expressa', desc: 'Foco em entregas urgentes e com agenda próxima' },
-  { value: 'economica', label: 'Econômica', desc: 'Maximiza ocupação, reduz número de veículos' },
+type MultiSelectField = keyof Pick<FiltrosCarteira, 'filial_r' | 'uf' | 'destin' | 'cidade' | 'tomad' | 'mesoregiao' | 'prioridade' | 'restricao_veiculo'>
+
+const TIPOS_ROTEIRIZACAO: Array<{ value: FiltrosRoteirizacao['tipo_roteirizacao']; label: string; desc: string }> = [
+  { value: 'carteira', label: 'Carteira', desc: 'Roteiriza o máximo possível da carteira filtrada' },
+  { value: 'frota', label: 'Frota', desc: 'Usa configuração manual de quantidade por perfil' },
 ]
+
+const FILTROS_MULTI_CONFIG: Array<{ key: MultiSelectField; label: string }> = [
+  { key: 'filial_r', label: 'Filial R' },
+  { key: 'uf', label: 'UF' },
+  { key: 'destin', label: 'Destino' },
+  { key: 'cidade', label: 'Cidade' },
+  { key: 'tomad', label: 'Tomador' },
+  { key: 'mesoregiao', label: 'Mesorregião' },
+  { key: 'prioridade', label: 'Prioridade' },
+  { key: 'restricao_veiculo', label: 'Restrição de Veículo' },
+]
+
+const FILTROS_CARTEIRA_INICIAIS: FiltrosCarteira = {
+  filial_r: [],
+  uf: [],
+  destin: [],
+  cidade: [],
+  tomad: [],
+  mesoregiao: [],
+  prioridade: [],
+  restricao_veiculo: [],
+  carro_dedicado: 'todos',
+  agendam_de: '',
+  agendam_ate: '',
+  dle_de: '',
+  dle_ate: '',
+  data_des_de: '',
+  data_des_ate: '',
+  data_nf_de: '',
+  data_nf_ate: '',
+}
 
 export function RoteirizacaoPage() {
   const {
@@ -40,13 +80,13 @@ export function RoteirizacaoPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [etapa, setEtapa] = useState<Etapa>('upload')
+  const [filtrosCarteira, setFiltrosCarteira] = useState<FiltrosCarteira>(FILTROS_CARTEIRA_INICIAIS)
   const [filtros, setFiltros] = useState<FiltrosRoteirizacao>({
     data_base: new Date().toISOString().slice(0, 16),
-    tipo_roteirizacao: 'padrao',
+    tipo_roteirizacao: 'carteira',
     filial_id: filialAtiva?.id || '',
-    considerar_agendados: true,
-    apenas_agendados: false,
-    veiculos_ids: [],
+    filtros_aplicados: FILTROS_CARTEIRA_INICIAIS,
+    configuracao_frota: [],
   })
   const [processando, setProcessando] = useState(false)
   const [progressoMsg, setProgressoMsg] = useState('')
@@ -59,6 +99,25 @@ export function RoteirizacaoPage() {
   const [filiaisMasterError, setFiliaisMasterError] = useState<string | null>(null)
   const [filialSelecionadaMaster, setFilialSelecionadaMaster] = useState('')
 
+  const [totalValidas, setTotalValidas] = useState(0)
+  const [carteiraFiltrada, setCarteiraFiltrada] = useState<CarteiraCarga[]>([])
+  const [resumoLoading, setResumoLoading] = useState(false)
+  const [resumoErro, setResumoErro] = useState<string | null>(null)
+  const [opcoesFiltro, setOpcoesFiltro] = useState<Record<MultiSelectField, string[]>>({
+    filial_r: [],
+    uf: [],
+    destin: [],
+    cidade: [],
+    tomad: [],
+    mesoregiao: [],
+    prioridade: [],
+    restricao_veiculo: [],
+  })
+
+  const [quantidadePorPerfil, setQuantidadePorPerfil] = useState<Record<string, number>>({})
+  const [perfisFrota, setPerfisFrota] = useState<string[]>([])
+  const [frotaLoading, setFrotaLoading] = useState(false)
+
   const filialOperacionalId = isMaster ? filialSelecionadaMaster : (filialAtiva?.id ?? '')
   const filialOperacional = useMemo(() => {
     if (isMaster) {
@@ -67,6 +126,17 @@ export function RoteirizacaoPage() {
     return filialAtiva ?? null
   }, [isMaster, filialAtiva, filiaisMaster, filialSelecionadaMaster])
 
+  const configuracaoFrota = useMemo<ConfiguracaoFrotaItem[]>(() => Object.entries(quantidadePorPerfil)
+    .filter(([, quantidade]) => quantidade > 0)
+    .map(([perfil, quantidade]) => ({ perfil, quantidade })), [quantidadePorPerfil])
+
+  const totalColunasResumo = useMemo(() => {
+    const primeira = carteiraFiltrada[0] as Record<string, unknown> | undefined
+    return primeira ? Object.keys(primeira).length : upload.totalColunas
+  }, [carteiraFiltrada, upload.totalColunas])
+
+  const previewResumo = useMemo(() => carteiraFiltrada.slice(0, 5), [carteiraFiltrada])
+
   useEffect(() => {
     setFiltros((prev) => (
       prev.filial_id === filialOperacionalId
@@ -74,6 +144,17 @@ export function RoteirizacaoPage() {
         : { ...prev, filial_id: filialOperacionalId }
     ))
   }, [filialOperacionalId])
+
+  useEffect(() => {
+    setFiltros((prev) => ({ ...prev, filtros_aplicados: filtrosCarteira }))
+  }, [filtrosCarteira])
+
+  useEffect(() => {
+    setFiltros((prev) => ({
+      ...prev,
+      configuracao_frota: prev.tipo_roteirizacao === 'frota' ? configuracaoFrota : [],
+    }))
+  }, [configuracaoFrota])
 
   useEffect(() => {
     const carregarFiliaisMaster = async () => {
@@ -105,6 +186,80 @@ export function RoteirizacaoPage() {
     carregarFiliaisMaster()
   }, [isMaster])
 
+  useEffect(() => {
+    const carregarResumo = async () => {
+      if (!upload.uploadId) return
+      setResumoLoading(true)
+      setResumoErro(null)
+
+      try {
+        const validas = await roteirizacaoService.buscarCarteiraFiltrada(upload.uploadId)
+        setTotalValidas(validas.length)
+
+        const filtradas = await roteirizacaoService.buscarCarteiraFiltrada(upload.uploadId, filtrosCarteira)
+        setCarteiraFiltrada(filtradas)
+
+        const opcoes: Record<MultiSelectField, string[]> = {
+          filial_r: [],
+          uf: [],
+          destin: [],
+          cidade: [],
+          tomad: [],
+          mesoregiao: [],
+          prioridade: [],
+          restricao_veiculo: [],
+        }
+
+        for (const campo of FILTROS_MULTI_CONFIG.map((item) => item.key)) {
+          const valores = new Set(
+            validas
+              .map((linha) => String((linha as Record<string, unknown>)[campo] ?? '').trim())
+              .filter(Boolean),
+          )
+          opcoes[campo] = Array.from(valores).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+        }
+
+        setOpcoesFiltro(opcoes)
+      } catch (error) {
+        setResumoErro(getErrorMessage(error, 'Não foi possível atualizar resumo da carteira.'))
+      } finally {
+        setResumoLoading(false)
+      }
+    }
+
+    void carregarResumo()
+  }, [upload.uploadId, filtrosCarteira, filtros.tipo_roteirizacao])
+
+  useEffect(() => {
+    const carregarPerfisFrota = async () => {
+      if (filtros.tipo_roteirizacao !== 'frota' || !filialOperacionalId) {
+        setPerfisFrota([])
+        setQuantidadePorPerfil({})
+        return
+      }
+
+      setFrotaLoading(true)
+      try {
+        const veiculos = await veiculosService.listarAtivos(filialOperacionalId)
+        const perfis = Array.from(new Set(veiculos.map((v) => v.tipo))).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+        setPerfisFrota(perfis)
+        setQuantidadePorPerfil((prev) => {
+          const next: Record<string, number> = {}
+          for (const perfil of perfis) {
+            next[perfil] = prev[perfil] ?? 0
+          }
+          return next
+        })
+      } catch (error) {
+        toast.error(getErrorMessage(error, 'Não foi possível carregar perfis de frota.'))
+      } finally {
+        setFrotaLoading(false)
+      }
+    }
+
+    void carregarPerfisFrota()
+  }, [filtros.tipo_roteirizacao, filialOperacionalId])
+
   const handleArquivo = async (file: File) => {
     if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
       toast.error('Formato inválido. Use .xlsx, .xls ou .csv')
@@ -133,7 +288,7 @@ export function RoteirizacaoPage() {
         void handleArquivo(file)
       }
     },
-    [handleArquivo]
+    [handleArquivo],
   )
 
   const confirmarPreview = () => {
@@ -144,7 +299,24 @@ export function RoteirizacaoPage() {
     setEtapa('filtros')
   }
 
+  const onMultiSelectChange = (field: MultiSelectField, selected: HTMLOptionsCollection) => {
+    const values = Array.from(selected)
+      .filter((option) => option.selected)
+      .map((option) => option.value)
+
+    setFiltrosCarteira((prev) => ({ ...prev, [field]: values }))
+  }
+
+  const limparFiltros = () => {
+    setFiltrosCarteira(FILTROS_CARTEIRA_INICIAIS)
+    setQuantidadePorPerfil((prev) => Object.fromEntries(Object.keys(prev).map((k) => [k, 0])))
+  }
+
   const roteirizar = async () => {
+    if (!upload.uploadId) {
+      toast.error('Upload não encontrado. Reimporte a carteira.')
+      return
+    }
     if (!filialOperacionalId || !filialOperacional) {
       toast.error('Selecione uma filial válida para roteirizar')
       return
@@ -153,37 +325,45 @@ export function RoteirizacaoPage() {
       toast.error('Informe a data base da roteirização')
       return
     }
-    if (!upload.uploadId) {
-      toast.error('Upload não encontrado. Reimporte a carteira.')
-      return
-    }
     if (!user?.id) {
       toast.error('Usuário não autenticado')
       return
     }
+    if (!carteiraFiltrada.length) {
+      toast.error('Nenhuma carga encontrada após aplicação dos filtros')
+      return
+    }
+
+    const frotaParaPayload = filtros.tipo_roteirizacao === 'frota' ? configuracaoFrota : []
+
+    if (filtros.tipo_roteirizacao === 'frota' && frotaParaPayload.length === 0) {
+      toast.error('Informe quantidade maior que zero para pelo menos um perfil da frota')
+      return
+    }
+
+    console.log('[ROTEIRIZACAO] filtros aplicados:', filtrosCarteira)
+    console.log('[ROTEIRIZACAO] tipo:', filtros.tipo_roteirizacao)
+    console.log('[ROTEIRIZACAO] frota:', frotaParaPayload)
+    console.log('[ROTEIRIZACAO] qtd carteira:', carteiraFiltrada.length)
 
     setProcessando(true)
     setEtapa('processando')
 
     try {
-      setProgressoMsg('Carregando frota da filial...')
-      const veiculos = await veiculosService.listarAtivos(filialOperacionalId)
-
-      if (veiculos.length === 0) {
-        toast.error('Nenhum veículo ativo cadastrado para esta filial')
-        setEtapa('filtros')
-        setProcessando(false)
-        return
-      }
-
-      setProgressoMsg(`${veiculos.length} veículo(s) carregado(s). Enviando para o Motor...`)
+      setProgressoMsg('Enviando carteira filtrada para o Motor...')
 
       const resultado = await roteirizacaoService.roteirizar(
         filialOperacional,
-        veiculos,
         upload.uploadId,
-        { ...filtros, filial_id: filialOperacionalId },
-        user.id
+        {
+          ...filtros,
+          filial_id: filialOperacionalId,
+          filtros_aplicados: filtrosCarteira,
+          configuracao_frota: frotaParaPayload,
+        },
+        user.id,
+        carteiraFiltrada,
+        frotaParaPayload,
       )
 
       setRodada(resultado.rodada)
@@ -202,6 +382,11 @@ export function RoteirizacaoPage() {
 
   const reiniciar = () => {
     limpar()
+    setFiltrosCarteira(FILTROS_CARTEIRA_INICIAIS)
+    setQuantidadePorPerfil({})
+    setPerfisFrota([])
+    setCarteiraFiltrada([])
+    setTotalValidas(0)
     setEtapa('upload')
     setRodada(null)
     setManifestos([])
@@ -214,7 +399,7 @@ export function RoteirizacaoPage() {
 
   const aprovarManifesto = (id: string) => {
     setManifestos((prev) =>
-      prev.map((m) => m.id_manifesto === id ? { ...m, aprovado: !m.aprovado } : m)
+      prev.map((m) => m.id_manifesto === id ? { ...m, aprovado: !m.aprovado } : m),
     )
   }
 
@@ -251,7 +436,6 @@ export function RoteirizacaoPage() {
     )
   }
 
-  // ─── ETAPA: UPLOAD ────────────────────────────────────────────────────────
   if (etapa === 'upload') {
     return (
       <div className="fade-in max-w-2xl mx-auto">
@@ -399,62 +583,192 @@ export function RoteirizacaoPage() {
 
   if (etapa === 'filtros') {
     return (
-      <div className="fade-in max-w-2xl mx-auto">
+      <div className="fade-in">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1>Configurar Roteirização</h1>
-            <p className="text-gray-500 text-sm">{upload.totalLinhas} cargas · {filialOperacional?.nome || 'Filial não selecionada'}</p>
+            <p className="text-gray-500 text-sm">{carteiraFiltrada.length} cargas após filtros · {filialOperacional?.nome || 'Filial não selecionada'}</p>
           </div>
           <button className="btn-ghost" onClick={() => setEtapa('preview')}>Voltar</button>
         </div>
 
-        <div className="card p-6 space-y-6">
-          {isMaster && (
-            <div>
-              <label className="label">Filial operacional *</label>
-              <select className="input" value={filialSelecionadaMaster} onChange={(e) => setFilialSelecionadaMaster(e.target.value)}>
-                <option value="">Selecione a filial...</option>
-                {filiaisMaster.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
-              </select>
-            </div>
-          )}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="xl:col-span-2 card p-6 space-y-6">
+            {isMaster && (
+              <div>
+                <label className="label">Filial operacional *</label>
+                <select className="input" value={filialSelecionadaMaster} onChange={(e) => setFilialSelecionadaMaster(e.target.value)}>
+                  <option value="">Selecione a filial...</option>
+                  {filiaisMaster.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                </select>
+              </div>
+            )}
 
-          <div>
-            <label className="label">Data Base da Roteirização *</label>
-            <input type="datetime-local" className="input" value={filtros.data_base} onChange={(e) => setFiltros({ ...filtros, data_base: e.target.value })} />
+            <div>
+              <label className="label">Data Base da Roteirização *</label>
+              <input type="datetime-local" className="input" value={filtros.data_base} onChange={(e) => setFiltros({ ...filtros, data_base: e.target.value })} />
+            </div>
+
+            <div>
+              <label className="label">Tipo de Roteirização *</label>
+              <div className="space-y-3 mt-2">
+                {TIPOS_ROTEIRIZACAO.map((tipo) => (
+                  <label
+                    key={tipo.value}
+                    className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      filtros.tipo_roteirizacao === tipo.value ? 'border-brand-500 bg-brand-50' : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="tipo_roteirizacao"
+                      value={tipo.value}
+                      checked={filtros.tipo_roteirizacao === tipo.value}
+                      onChange={() => setFiltros({ ...filtros, tipo_roteirizacao: tipo.value })}
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <div className="font-semibold text-gray-900">{tipo.label}</div>
+                      <div className="text-sm text-gray-500">{tipo.desc}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t pt-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900">Filtros da Carteira</h3>
+                <button className="btn-ghost" onClick={limparFiltros}>
+                  <FilterX size={14} /> Limpar filtros
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {FILTROS_MULTI_CONFIG.map(({ key, label }) => (
+                  <div key={key}>
+                    <label className="label">{label}</label>
+                    <select
+                      multiple
+                      className="input min-h-[120px]"
+                      value={filtrosCarteira[key]}
+                      onChange={(e) => onMultiSelectChange(key, e.target.options)}
+                    >
+                      {opcoesFiltro[key].map((value) => (
+                        <option key={value} value={value}>{value}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+
+                <div>
+                  <label className="label">Carro Dedicado</label>
+                  <select
+                    className="input"
+                    value={filtrosCarteira.carro_dedicado}
+                    onChange={(e) => setFiltrosCarteira((prev) => ({ ...prev, carro_dedicado: e.target.value as FiltrosCarteira['carro_dedicado'] }))}
+                  >
+                    <option value="todos">Todos</option>
+                    <option value="sim">Sim</option>
+                    <option value="nao">Não</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                <div>
+                  <label className="label">Agendam. DE / ATÉ</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" className="input" value={filtrosCarteira.agendam_de} onChange={(e) => setFiltrosCarteira((prev) => ({ ...prev, agendam_de: e.target.value }))} />
+                    <input type="date" className="input" value={filtrosCarteira.agendam_ate} onChange={(e) => setFiltrosCarteira((prev) => ({ ...prev, agendam_ate: e.target.value }))} />
+                  </div>
+                </div>
+                <div>
+                  <label className="label">D.L.E. DE / ATÉ</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" className="input" value={filtrosCarteira.dle_de} onChange={(e) => setFiltrosCarteira((prev) => ({ ...prev, dle_de: e.target.value }))} />
+                    <input type="date" className="input" value={filtrosCarteira.dle_ate} onChange={(e) => setFiltrosCarteira((prev) => ({ ...prev, dle_ate: e.target.value }))} />
+                  </div>
+                </div>
+                <div>
+                  <label className="label">Data Des. DE / ATÉ</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" className="input" value={filtrosCarteira.data_des_de} onChange={(e) => setFiltrosCarteira((prev) => ({ ...prev, data_des_de: e.target.value }))} />
+                    <input type="date" className="input" value={filtrosCarteira.data_des_ate} onChange={(e) => setFiltrosCarteira((prev) => ({ ...prev, data_des_ate: e.target.value }))} />
+                  </div>
+                </div>
+                <div>
+                  <label className="label">Data NF DE / ATÉ</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" className="input" value={filtrosCarteira.data_nf_de} onChange={(e) => setFiltrosCarteira((prev) => ({ ...prev, data_nf_de: e.target.value }))} />
+                    <input type="date" className="input" value={filtrosCarteira.data_nf_ate} onChange={(e) => setFiltrosCarteira((prev) => ({ ...prev, data_nf_ate: e.target.value }))} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {filtros.tipo_roteirizacao === 'frota' && (
+              <div className="border-t pt-6 space-y-3">
+                <h3 className="font-semibold text-gray-900">Configuração de Frota por Perfil</h3>
+                {frotaLoading && <p className="text-sm text-gray-500">Carregando perfis...</p>}
+                {!frotaLoading && perfisFrota.length === 0 && <p className="text-sm text-amber-700">Nenhum perfil de veículo ativo encontrado para a filial.</p>}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {perfisFrota.map((perfil) => (
+                    <div key={perfil} className="flex items-center justify-between border rounded-lg p-3">
+                      <span className="font-medium">{perfil}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        className="input w-28"
+                        value={quantidadePorPerfil[perfil] ?? 0}
+                        onChange={(e) => setQuantidadePorPerfil((prev) => ({ ...prev, [perfil]: Number(e.target.value || 0) }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+                {configuracaoFrota.length === 0 && <p className="text-sm text-red-600">Informe quantidade maior que zero para ao menos um perfil.</p>}
+              </div>
+            )}
           </div>
 
-          <div>
-            <label className="label">Tipo de Roteirização *</label>
-            <div className="space-y-3 mt-2">
-              {TIPOS_ROTEIRIZACAO.map((tipo) => (
-                <label
-                  key={tipo.value}
-                  className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                    filtros.tipo_roteirizacao === tipo.value ? 'border-brand-500 bg-brand-50' : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="tipo_roteirizacao"
-                    value={tipo.value}
-                    checked={filtros.tipo_roteirizacao === tipo.value}
-                    onChange={() => setFiltros({ ...filtros, tipo_roteirizacao: tipo.value as FiltrosRoteirizacao['tipo_roteirizacao'] })}
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <div className="font-semibold text-gray-900">{tipo.label}</div>
-                    <div className="text-sm text-gray-500">{tipo.desc}</div>
-                  </div>
-                </label>
-              ))}
+          <div className="card p-5 space-y-4 h-fit">
+            <h3 className="font-semibold text-gray-900">Resumo em tempo real</h3>
+            {resumoErro && <p className="text-sm text-red-600">{resumoErro}</p>}
+            {resumoLoading && <p className="text-sm text-gray-500">Atualizando resumo...</p>}
+            <div className="text-sm text-gray-600 space-y-2">
+              <p><strong>Total linhas válidas:</strong> {totalValidas}</p>
+              <p><strong>Total após filtros:</strong> {carteiraFiltrada.length}</p>
+              <p><strong>Arquivo:</strong> {upload.nomeArquivo || upload.arquivo?.name || '—'}</p>
+              <p><strong>Quantidade de colunas:</strong> {totalColunasResumo}</p>
+              <p><strong>Filial operacional:</strong> {filialOperacional?.nome || '—'}</p>
+              <p><strong>Tipo selecionado:</strong> {filtros.tipo_roteirizacao}</p>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-semibold text-gray-900 mb-2">Preview (primeiras linhas)</h4>
+              <div className="max-h-64 overflow-auto border rounded-lg">
+                <table className="table text-xs">
+                  <tbody>
+                    {previewResumo.map((row, idx) => (
+                      <tr key={idx}>
+                        <td className="font-mono text-[11px] whitespace-pre-wrap">{JSON.stringify(row)}</td>
+                      </tr>
+                    ))}
+                    {previewResumo.length === 0 && (
+                      <tr>
+                        <td className="text-gray-400">Sem registros após filtros.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
 
         <div className="flex justify-end gap-3 mt-6">
           <button className="btn-secondary" onClick={() => setEtapa('preview')}>Voltar</button>
-          <button className="btn-primary text-base px-8 py-3" onClick={roteirizar} disabled={!filialOperacionalId}>
+          <button className="btn-primary text-base px-8 py-3" onClick={roteirizar} disabled={!filialOperacionalId || processando}>
             <Play size={18} /> Roteirizar Agora
           </button>
         </div>

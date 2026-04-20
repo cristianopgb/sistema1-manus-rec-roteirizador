@@ -112,52 +112,55 @@ export interface RodadaRoteirizacao {
 }
 
 // --- Tipos de Roteirização ---
-export type TipoRoteirizacao = 'padrao' | 'normal' | 'agendado' | 'urgente' | 'misto'
+export type TipoRoteirizacao = 'carteira' | 'frota'
+
+export type CarroDedicadoFiltro = 'todos' | 'sim' | 'nao'
+
+export interface FiltrosCarteira {
+  filial_r: string[]
+  uf: string[]
+  destin: string[]
+  cidade: string[]
+  tomad: string[]
+  mesoregiao: string[]
+  prioridade: string[]
+  restricao_veiculo: string[]
+  carro_dedicado: CarroDedicadoFiltro
+  agendam_de: string
+  agendam_ate: string
+  dle_de: string
+  dle_ate: string
+  data_des_de: string
+  data_des_ate: string
+  data_nf_de: string
+  data_nf_ate: string
+}
+
+export interface ConfiguracaoFrotaItem {
+  perfil: string
+  quantidade: number
+}
 
 // --- Filtros de Roteirização ---
 export interface FiltrosRoteirizacao {
   filial_id: string
   tipo_roteirizacao: TipoRoteirizacao
   data_base: string
-  considerar_agendados: boolean
-  apenas_agendados: boolean
-  veiculos_ids: string[]
+  filtros_aplicados: FiltrosCarteira
+  configuracao_frota: ConfiguracaoFrotaItem[]
 }
 
 // --- Payload para o Motor (Sistema 2) ---
 export interface PayloadMotor {
-  filial: {
-    id: string
-    codigo: string
-    nome: string
-    cidade: string
-    uf: string
-    latitude: number
-    longitude: number
-  }
-  parametros: {
-    data_base_roteirizacao: string
-    tipo_roteirizacao: TipoRoteirizacao
-    filial_id: string
-    filial_nome: string
-  }
-  veiculos: VeiculoPayload[]
+  rodada_id: string
+  upload_id: string
+  usuario_id: string
+  filial_id: string
+  data_base_roteirizacao: string
+  tipo_roteirizacao: TipoRoteirizacao
+  filtros_aplicados: FiltrosCarteira
+  configuracao_frota: ConfiguracaoFrotaItem[]
   carteira: CarteiraCarga[]
-}
-
-export interface VeiculoPayload {
-  id: string
-  codigo: string
-  placa: string
-  tipo: string
-  capacidade_peso_kg: number
-  capacidade_volume_m3: number
-  num_eixos: number
-  max_km_distancia: number
-  max_entregas: number
-  ocupacao_minima_perc: number
-  ocupacao_maxima_perc: number
-  motorista?: string
 }
 
 export interface CarteiraCarga {
