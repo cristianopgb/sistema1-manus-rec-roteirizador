@@ -176,11 +176,11 @@ export const roteirizacaoService = {
         const numEixos = manifesto.num_eixos || 2
 
         const coef = tabelaAntt.find(
-          (t) => t.tipo_carga_id === tipoCargaId && t.num_eixos === numEixos
+          (t) => t.codigo_tipo === tipoCargaId && t.num_eixos === numEixos
         )
 
-        const coefDeslocamento = coef?.coeficiente_deslocamento || 0
-        const coefCargaDescarga = coef?.coeficiente_carga_descarga || 0
+        const coefDeslocamento = coef?.coef_ccd || 0
+        const coefCargaDescarga = coef?.coef_cc || 0
         const freteMinimo = anttService.calcularFreteMinimo(
           manifesto.km_estimado,
           coefDeslocamento,

@@ -54,16 +54,16 @@ export interface Veiculo {
 // --- Tabela ANTT ---
 export interface TabelaAntt {
   id: string
-  tipo_carga_id: number
-  tipo_carga_nome: string
+  codigo_tipo: number
+  nome_tipo: string
   num_eixos: number
-  coeficiente_deslocamento: number  // R$/km
-  coeficiente_carga_descarga: number  // R$
+  coef_ccd: number  // R$/km
+  coef_cc: number  // R$
   vigencia_inicio: string
   vigencia_fim?: string
-  ativo: boolean
+  ativa: boolean
+  created_at: string
   updated_at: string
-  updated_by?: string
 }
 
 // Tipos de carga ANTT

@@ -51,16 +51,16 @@ export type Database = {
       tabela_antt: {
         Row: {
           id: string
-          tipo_carga_id: number
-          tipo_carga_nome: string
+          codigo_tipo: number
+          nome_tipo: string
           num_eixos: number
-          coeficiente_deslocamento: number
-          coeficiente_carga_descarga: number
+          coef_ccd: number
+          coef_cc: number
           vigencia_inicio: string
           vigencia_fim: string | null
-          ativo: boolean
+          ativa: boolean
+          created_at: string
           updated_at: string
-          updated_by: string | null
         }
       }
       uploads_carteira: {

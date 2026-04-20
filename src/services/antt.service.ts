@@ -6,10 +6,13 @@ export const anttService = {
     const { data, error } = await supabase
       .from('tabela_antt')
       .select('*')
-      .eq('ativo', true)
-      .order('tipo_carga_id')
-      .order('num_eixos')
-    if (error) throw error
+      .eq('ativa', true)
+      .order('codigo_tipo', { ascending: true })
+      .order('num_eixos', { ascending: true })
+    if (error) {
+      console.error('[ANTT] Falha ao carregar tabela_antt', error)
+      return []
+    }
     return data as TabelaAntt[]
   },
 
@@ -17,11 +20,14 @@ export const anttService = {
     const { data, error } = await supabase
       .from('tabela_antt')
       .select('*')
-      .eq('tipo_carga_id', tipoCargaId)
+      .eq('codigo_tipo', tipoCargaId)
       .eq('num_eixos', numEixos)
-      .eq('ativo', true)
+      .eq('ativa', true)
       .single()
-    if (error) return null
+    if (error) {
+      console.error('[ANTT] Falha ao buscar coeficiente na tabela_antt', { tipoCargaId, numEixos, error })
+      return null
+    }
     return data as TabelaAntt
   },
 
@@ -36,9 +42,9 @@ export const anttService = {
     return data as TabelaAntt
   },
 
-  async importarTabela(registros: Omit<TabelaAntt, 'id' | 'updated_at' | 'updated_by'>[]): Promise<void> {
+  async importarTabela(registros: Omit<TabelaAntt, 'id' | 'updated_at' | 'created_at'>[]): Promise<void> {
     // Desativar registros antigos
-    await supabase.from('tabela_antt').update({ ativo: false }).eq('ativo', true)
+    await supabase.from('tabela_antt').update({ ativa: false }).eq('ativa', true)
     // Inserir novos
     const { error } = await supabase.from('tabela_antt').insert(
       registros.map((r) => ({ ...r, updated_at: new Date().toISOString() }))
@@ -48,7 +54,7 @@ export const anttService = {
 
   /**
    * Calcula o frete mínimo ANTT para um manifesto
-   * Fórmula: (km * coeficiente_deslocamento) + coeficiente_carga_descarga
+   * Fórmula: (km * coef_ccd) + coef_cc
    */
   calcularFreteMinimo(
     kmEstimado: number,
