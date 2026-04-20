@@ -61,9 +61,31 @@ export function useUploadCarteira() {
     }
   }, [])
 
+  const carregarUploadExistente = useCallback((payload: {
+    uploadId: string
+    nomeArquivo: string
+    totalLinhas: number
+    totalColunas: number
+    colunasDetectadas: string[]
+    linhaCabecalhoDetectada: number | null
+    preview: Record<string, unknown>[]
+  }) => {
+    setState((prev) => ({
+      ...prev,
+      uploadId: payload.uploadId,
+      nomeArquivo: payload.nomeArquivo,
+      totalLinhas: payload.totalLinhas,
+      totalColunas: payload.totalColunas,
+      colunasDetectadas: payload.colunasDetectadas,
+      linhaCabecalhoDetectada: payload.linhaCabecalhoDetectada,
+      preview: payload.preview,
+      erro: null,
+    }))
+  }, [])
+
   const limpar = useCallback(() => {
     setState(ESTADO_INICIAL)
   }, [])
 
-  return { state, processar, limpar }
+  return { state, processar, limpar, carregarUploadExistente }
 }

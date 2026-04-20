@@ -214,6 +214,20 @@ const validarCabecalho = (headerRow: unknown[]): string[] => {
   return DATASET_COLUNAS_BRUTAS.map((_, i) => String(cleaned[i] ?? DATASET_COLUNAS_BRUTAS[i]))
 }
 
+
+
+export interface UploadCarteiraHistorico {
+  id: string
+  nome_arquivo: string
+  status: string
+  created_at: string
+  total_linhas_importadas: number
+  total_linhas_validas: number
+  total_colunas_detectadas: number
+  linha_cabecalho_detectada: number | null
+  colunas_detectadas_json: string[]
+}
+
 export interface ImportarCarteiraResult {
   uploadId: string
   nomeArquivo: string
@@ -364,6 +378,63 @@ export const carteiraUploadService = {
       colunasDetectadas: [...DATASET_COLUNAS_BRUTAS],
       preview,
     }
+  },
+
+
+  async listarUploadsRecentes(filialId?: string, limite = 10): Promise<UploadCarteiraHistorico[]> {
+    let query = supabase
+      .from('uploads_carteira')
+      .select('id, nome_arquivo, status, created_at, total_linhas_importadas, total_linhas_validas, total_colunas_detectadas, linha_cabecalho_detectada, colunas_detectadas_json')
+      .order('created_at', { ascending: false })
+      .limit(limite)
+
+    if (filialId) {
+      query = query.eq('filial_id', filialId)
+    }
+
+    const { data, error } = await query
+    if (error) throw error
+
+    return (data ?? []) as UploadCarteiraHistorico[]
+  },
+
+  async buscarUpload(uploadId: string): Promise<UploadCarteiraHistorico> {
+    const { data, error } = await supabase
+      .from('uploads_carteira')
+      .select('id, nome_arquivo, status, created_at, total_linhas_importadas, total_linhas_validas, total_colunas_detectadas, linha_cabecalho_detectada, colunas_detectadas_json')
+      .eq('id', uploadId)
+      .single()
+
+    if (error || !data) {
+      throw new Error(error?.message || 'Upload não encontrado')
+    }
+
+    return data as UploadCarteiraHistorico
+  },
+
+  async buscarPreviewUpload(uploadId: string, limite = 5): Promise<CarteiraCarga[]> {
+    const { data, error } = await supabase
+      .from('carteira_itens')
+      .select('*')
+      .eq('upload_id', uploadId)
+      .eq('status_validacao', 'valida')
+      .order('linha_numero', { ascending: true })
+      .limit(limite)
+
+    if (error) throw error
+
+    return (data ?? []).map((row) => {
+      const { id, upload_id, status_validacao, erro_validacao, created_at, dados_originais_json, ...rest } = row
+      return {
+        ...rest,
+        _carteira_item_id: id,
+        _upload_id: upload_id,
+        _status_validacao: status_validacao,
+        _erro_validacao: erro_validacao,
+        _created_at: created_at,
+        _dados_originais: dados_originais_json,
+      } as CarteiraCarga
+    })
   },
 
   expectedRawColumns: DATASET_COLUNAS_BRUTAS,
