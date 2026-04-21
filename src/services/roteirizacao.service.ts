@@ -11,6 +11,7 @@ import {
   RodadaRoteirizacao, FiltrosRoteirizacao, CarteiraCarga,
   Filial, FiltrosCarteira, ConfiguracaoFrotaItem, CarteiraCargaContratoMotor
 } from '@/types'
+import { normalizeInicioEntrega } from '@/lib/time-normalizers'
 
 const CAMPOS_MULTISELECT: Array<keyof Pick<FiltrosCarteira, 'filial_r' | 'uf' | 'destin' | 'cidade' | 'tomad' | 'mesoregiao' | 'prioridade' | 'restricao_veiculo'>> = [
   'filial_r',
@@ -105,7 +106,17 @@ const mapVeiculoToMotor = (veiculo: Record<string, unknown>) => ({
   ativo: veiculo.ativo === true,
 })
 
-const mapCarteiraItemToMotorContract = (item: CarteiraCarga): CarteiraCargaContratoMotor => ({
+const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): CarteiraCargaContratoMotor => {
+  const inicioEntregaNormalizado = normalizeInicioEntrega(item.inicio_entrega)
+  if (import.meta.env.DEV) {
+    console.log('[PAYLOAD] Inicio Ent. original:', item.inicio_entrega)
+    console.log('[PAYLOAD] Inicio Ent. normalizado:', inicioEntregaNormalizado)
+    if (item.inicio_entrega !== null && item.inicio_entrega !== undefined && inicioEntregaNormalizado === null) {
+      console.log('[PAYLOAD] Inicio Ent. inválido convertido para null no índice:', index, 'item_id:', item._carteira_item_id)
+    }
+  }
+
+  return ({
   'Filial R': item.filial_r,
   Romane: item.romane,
   'Filial D': item.filial_d,
@@ -147,9 +158,10 @@ const mapCarteiraItemToMotorContract = (item: CarteiraCarga): CarteiraCargaContr
   Prioridade: item.prioridade,
   'Restrição Veículo': item.restricao_veiculo,
   'Carro Dedicado': item.carro_dedicado,
-  'Inicio Ent.': item.inicio_entrega,
+  'Inicio Ent.': inicioEntregaNormalizado,
   'Fim En': item.fim_entrega,
 })
+}
 
 const extrairMensagemErro = (body: unknown): string => {
   if (!body) return 'Erro de validação sem detalhes'
@@ -204,7 +216,7 @@ export const roteirizacaoService = {
     const rodadaId = crypto.randomUUID()
     const dataBaseRoteirizacaoIso = toIsoCompleto(filtros.data_base)
     const dataExecucaoIso = new Date().toISOString()
-    const carteiraContrato = carteira.map(mapCarteiraItemToMotorContract)
+    const carteiraContrato = carteira.map((item, index) => mapCarteiraItemToMotorContract(item, index))
     const { data: veiculosData, error: veiculosError } = await supabase
       .from('veiculos')
       .select('id, filial_id, tipo, placa, capacidade_peso_kg, capacidade_volume_m3, num_eixos, max_km_distancia, max_entregas, ocupacao_minima_perc, ocupacao_maxima_perc, ativo')
