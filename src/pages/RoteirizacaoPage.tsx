@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Upload, FileSpreadsheet, Play, Loader2,
   CheckCircle, XCircle, AlertTriangle,
@@ -77,6 +78,7 @@ const formatColumnLabel = (coluna: string) => coluna
   .replace(/\b\w/g, (l) => l.toUpperCase())
 
 export function RoteirizacaoPage() {
+  const navigate = useNavigate()
   const { user, filialAtiva, isMaster, profileLoading, profileError, filialLoading, filialError, reloadAuthContext } = useAuth()
   const { state: upload, processar, limpar, carregarUploadExistente } = useUploadCarteira()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -381,10 +383,8 @@ export function RoteirizacaoPage() {
         frotaParaPayload,
       )
 
-      setRodada(resultado.rodada)
-      setManifestos(resultado.manifestos)
-      setEtapa('resultado')
       toast.success(`Roteirização concluída! ${resultado.manifestos.length} manifesto(s) gerado(s)`)
+      navigate(`/historico?rodada=${resultado.rodada.id}`, { replace: true })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erro desconhecido')
       setEtapa('filtros')
