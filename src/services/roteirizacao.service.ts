@@ -9,7 +9,7 @@ import {
 import {
   PayloadMotor, RespostaMotor, ManifestoComFrete,
   RodadaRoteirizacao, FiltrosRoteirizacao, CarteiraCarga,
-  Filial, FiltrosCarteira, ConfiguracaoFrotaItem
+  Filial, FiltrosCarteira, ConfiguracaoFrotaItem, CarteiraCargaContratoMotor
 } from '@/types'
 
 const CAMPOS_MULTISELECT: Array<keyof Pick<FiltrosCarteira, 'filial_r' | 'uf' | 'destin' | 'cidade' | 'tomad' | 'mesoregiao' | 'prioridade' | 'restricao_veiculo'>> = [
@@ -79,6 +79,73 @@ const isLinhaCarteiraSemConteudo = (row: Record<string, unknown>): boolean => {
   })
 }
 
+const toIsoCompleto = (value: string): string => {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return new Date().toISOString()
+  return parsed.toISOString()
+}
+
+const mapCarteiraItemToMotorContract = (item: CarteiraCarga): CarteiraCargaContratoMotor => ({
+  'Filial R': item.filial_r,
+  Romane: item.romane,
+  'Filial D': item.filial_d,
+  'Série': item.serie,
+  'Nro Doc.': item.nro_doc,
+  'Data Des': item.data_des,
+  'Data NF': item.data_nf,
+  'D.L.E.': item.dle,
+  'Agendam.': item.agendam,
+  Palet: item.palet,
+  Conf: item.conf,
+  Peso: item.peso,
+  'Vlr.Merc.': item.vlr_merc,
+  'Qtd.': item.qtd,
+  'Peso Cub.': item.peso_cubico,
+  Classif: item.classif,
+  Tomad: item.tomad,
+  Destin: item.destin,
+  Bairro: item.bairro,
+  Cidad: item.cidade,
+  UF: item.uf,
+  'NF / Serie': item.nf_serie,
+  'Tipo Ca': item.tipo_ca,
+  'Qtd.NF': item.qtd_nf,
+  Mesoregião: item.mesoregiao,
+  'Sub-Região': item.sub_regiao,
+  'Ocorrências NF': item.ocorrencias_nf,
+  Remetente: item.remetente,
+  Observação: item.observacao,
+  'Ref Cliente': item.ref_cliente,
+  'Cidade Dest.': item.cidade_dest,
+  Agenda: item.agenda,
+  'Tipo Carga': item.tipo_carga,
+  'Última Ocorrência': item.ultima_ocorrencia,
+  'Status R': item.status_r,
+  Latitude: item.latitude,
+  Longitude: item.longitude,
+  'Peso Calculo': item.peso_calculo,
+  Prioridade: item.prioridade,
+  'Restrição Veículo': item.restricao_veiculo,
+  'Carro Dedicado': item.carro_dedicado,
+  'Inicio Ent.': item.inicio_entrega,
+  'Fim En': item.fim_entrega,
+})
+
+const extrairMensagemErro = (body: unknown): string => {
+  if (!body) return 'Erro de validação sem detalhes'
+  if (typeof body === 'string') return body
+  if (typeof body === 'object') {
+    const maybe = body as Record<string, unknown>
+    if (typeof maybe.message === 'string') return maybe.message
+    if (typeof maybe.detail === 'string') return maybe.detail
+    if (Array.isArray(maybe.detail)) {
+      return maybe.detail.map((item) => JSON.stringify(item)).join(' | ')
+    }
+    if (typeof maybe.erro === 'string') return maybe.erro
+  }
+  return JSON.stringify(body)
+}
+
 export const roteirizacaoService = {
   async buscarCarteiraFiltrada(uploadId: string, filtros?: FiltrosCarteira): Promise<CarteiraCarga[]> {
     const baseQuery = supabase
@@ -115,6 +182,17 @@ export const roteirizacaoService = {
     }
 
     const rodadaId = crypto.randomUUID()
+    const dataBaseRoteirizacaoIso = toIsoCompleto(filtros.data_base)
+    const dataExecucaoIso = new Date().toISOString()
+    const carteiraContrato = carteira.map(mapCarteiraItemToMotorContract)
+
+    const { data: usuarioPerfil } = await supabase
+      .from('usuarios_perfil')
+      .select('nome')
+      .eq('id', usuarioId)
+      .maybeSingle()
+
+    const usuarioNome = usuarioPerfil?.nome || 'Usuário'
 
     // 1. Montar payload para o motor
     const payload: PayloadMotor = {
@@ -122,11 +200,62 @@ export const roteirizacaoService = {
       upload_id: uploadId,
       usuario_id: usuarioId,
       filial_id: filial.id,
-      data_base_roteirizacao: filtros.data_base,
+      data_base_roteirizacao: dataBaseRoteirizacaoIso,
       tipo_roteirizacao: filtros.tipo_roteirizacao,
       filtros_aplicados: filtros.filtros_aplicados,
       configuracao_frota: filtros.tipo_roteirizacao === 'frota' ? configuracaoFrota : [],
-      carteira,
+      filial: {
+        id: filial.id,
+        nome: filial.nome,
+        cidade: filial.cidade,
+        uf: filial.uf,
+        latitude: filial.latitude,
+        longitude: filial.longitude,
+      },
+      parametros: {
+        usuario_id: usuarioId,
+        usuario_nome: usuarioNome,
+        filial_id: filial.id,
+        filial_nome: filial.nome,
+        upload_id: uploadId,
+        rodada_id: rodadaId,
+        data_execucao: dataExecucaoIso,
+        data_base_roteirizacao: dataBaseRoteirizacaoIso,
+        origem_sistema: 'sistema1',
+        modelo_roteirizacao: 'roteirizador_rec',
+        tipo_roteirizacao: filtros.tipo_roteirizacao,
+        filtros_aplicados: filtros.filtros_aplicados,
+      },
+      carteira: carteiraContrato,
+    }
+
+    const payloadResumido = {
+      rodada_id: rodadaId,
+      upload_id: uploadId,
+      usuario_id: usuarioId,
+      filial_id: filial.id,
+      tipo_roteirizacao: filtros.tipo_roteirizacao,
+      data_base_roteirizacao: dataBaseRoteirizacaoIso,
+      total_carteira: carteiraContrato.length,
+    }
+
+    const { error: rodadaInicialError } = await supabase
+      .from('rodadas_roteirizacao')
+      .insert({
+        id: rodadaId,
+        filial_id: filial.id,
+        filial_nome: filial.nome,
+        usuario_id: usuarioId,
+        usuario_nome: usuarioNome,
+        upload_id: uploadId,
+        status: 'processando',
+        tipo_roteirizacao: filtros.tipo_roteirizacao,
+        data_base_roteirizacao: dataBaseRoteirizacaoIso,
+        total_cargas_entrada: carteiraContrato.length,
+        payload_enviado: payloadResumido as unknown as Record<string, unknown>,
+      })
+    if (rodadaInicialError) {
+      console.error('Erro ao criar rodada inicial:', rodadaInicialError)
     }
 
     // 2. Chamar o motor Python
@@ -138,6 +267,7 @@ export const roteirizacaoService = {
       console.log('[Motor2] Base URL:', motorBaseUrl)
       console.log('[Motor2] Path:', MOTOR_2_ROTEIRIZAR_PATH)
       console.log('[Motor2] Final URL:', finalUrl)
+      console.log('[Motor2] Payload final:', payload)
     }
 
     try {
@@ -151,6 +281,13 @@ export const roteirizacaoService = {
       if (!response.ok) {
         if (response.status === 404) {
           throw new Error('Endpoint do Motor 2 não encontrado (HTTP 404). Verifique a URL e o path configurados.')
+        }
+
+        if (response.status === 422) {
+          const body422 = await response.json().catch(() => null)
+          console.error('[Motor2] Body do erro 422:', body422)
+          const mensagem422 = extrairMensagemErro(body422)
+          throw new Error(`Motor retornou HTTP 422: ${mensagem422}`)
         }
 
         throw new Error(`Motor retornou HTTP ${response.status}`)
@@ -169,6 +306,16 @@ export const roteirizacaoService = {
         error: err,
       })
 
+      await supabase
+        .from('rodadas_roteirizacao')
+        .update({
+          status: 'erro',
+          erro_mensagem: mensagem,
+          tempo_processamento_ms: Date.now() - inicio,
+          payload_enviado: payload as unknown as Record<string, unknown>,
+        })
+        .eq('id', rodadaId)
+
       if (mensagem.includes('VITE_MOTOR_2_URL')) {
         throw new Error(`Configuração inválida do Motor 2: ${mensagem}`)
       }
@@ -177,6 +324,16 @@ export const roteirizacaoService = {
     }
 
     if (resposta.status === 'erro') {
+      await supabase
+        .from('rodadas_roteirizacao')
+        .update({
+          status: 'erro',
+          erro_mensagem: resposta.erro?.mensagem || 'O motor retornou um erro desconhecido',
+          tempo_processamento_ms: Date.now() - inicio,
+          resposta_motor: resposta as unknown as Record<string, unknown>,
+          payload_enviado: payload as unknown as Record<string, unknown>,
+        })
+        .eq('id', rodadaId)
       throw new Error(resposta.erro?.mensagem || 'O motor retornou um erro desconhecido')
     }
 
@@ -215,13 +372,8 @@ export const roteirizacaoService = {
     const tempoMs = Date.now() - inicio
     const { data: rodadaData, error: rodadaError } = await supabase
       .from('rodadas_roteirizacao')
-      .insert({
-        id: rodadaId,
-        filial_id: filial.id,
-        usuario_id: usuarioId,
-        upload_id: uploadId,
+      .update({
         status: resposta.status,
-        tipo_roteirizacao: filtros.tipo_roteirizacao,
         total_cargas_entrada: resposta.resumo.total_cargas_entrada,
         total_manifestos: resposta.resumo.total_manifestos,
         total_itens_manifestados: resposta.resumo.total_itens_manifestados,
@@ -232,6 +384,7 @@ export const roteirizacaoService = {
         payload_enviado: payload as unknown as Record<string, unknown>,
         resposta_motor: resposta as unknown as Record<string, unknown>,
       })
+      .eq('id', rodadaId)
       .select()
       .single()
 
