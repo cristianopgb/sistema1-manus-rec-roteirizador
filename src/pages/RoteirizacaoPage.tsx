@@ -111,6 +111,7 @@ export function RoteirizacaoPage() {
   const [quantidadePorPerfil, setQuantidadePorPerfil] = useState<Record<string, number>>({})
   const [perfisFrota, setPerfisFrota] = useState<string[]>([])
   const [frotaLoading, setFrotaLoading] = useState(false)
+  const [veiculosAtivosQtd, setVeiculosAtivosQtd] = useState(0)
 
   const filialOperacionalId = isMaster ? filialSelecionadaMaster : (filialAtiva?.id ?? '')
   const filialOperacional = useMemo(() => (isMaster ? filiaisMaster.find((f) => f.id === filialSelecionadaMaster) ?? null : filialAtiva ?? null), [isMaster, filialAtiva, filiaisMaster, filialSelecionadaMaster])
@@ -207,6 +208,12 @@ export function RoteirizacaoPage() {
   }, [configuracaoFrota])
 
   useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log('[ROTEIRIZACAO] tipo_roteirizacao na UI:', filtros.tipo_roteirizacao)
+    }
+  }, [filtros.tipo_roteirizacao])
+
+  useEffect(() => {
     const carregarFiliaisMaster = async () => {
       if (!isMaster) {
         setFiliaisMaster([])
@@ -260,6 +267,22 @@ export function RoteirizacaoPage() {
 
     void carregarResumo()
   }, [upload.uploadId, filtrosAplicadosCarteira])
+
+  useEffect(() => {
+    const carregarVeiculosAtivos = async () => {
+      if (!filialOperacionalId) {
+        setVeiculosAtivosQtd(0)
+        return
+      }
+      try {
+        const veiculos = await veiculosService.listarAtivos(filialOperacionalId)
+        setVeiculosAtivosQtd(veiculos.length)
+      } catch {
+        setVeiculosAtivosQtd(0)
+      }
+    }
+    void carregarVeiculosAtivos()
+  }, [filialOperacionalId])
 
   useEffect(() => {
     const carregarPerfisFrota = async () => {
@@ -328,16 +351,20 @@ export function RoteirizacaoPage() {
     if (!filtros.data_base) return toast.error('Informe a data base da roteirização')
     if (!user?.id) return toast.error('Usuário não autenticado')
     if (!carteiraFiltrada.length) return toast.error('Nenhuma carga encontrada após aplicação dos filtros')
+    if (veiculosAtivosQtd === 0) return toast.error('Nenhum veículo ativo encontrado para a filial operacional selecionada.')
 
     const frotaParaPayload = filtros.tipo_roteirizacao === 'frota' ? configuracaoFrota : []
     if (filtros.tipo_roteirizacao === 'frota' && frotaParaPayload.length === 0) {
-      return toast.error('Informe quantidade maior que zero para pelo menos um perfil da frota')
+      return toast.error('Informe quantidades válidas (> 0) para pelo menos um perfil da frota.')
     }
 
     setProcessando(true)
     setEtapa('processando')
 
     try {
+      if (import.meta.env.DEV) {
+        console.log('[ROTEIRIZACAO] tipo_roteirizacao salvo/enviado:', filtros.tipo_roteirizacao)
+      }
       setProgressoMsg('Enviando carteira filtrada para o Motor...')
       const resultado = await roteirizacaoService.roteirizar(
         filialOperacional,
@@ -345,6 +372,7 @@ export function RoteirizacaoPage() {
         {
           ...filtros,
           filial_id: filialOperacionalId,
+          tipo_roteirizacao: filtros.tipo_roteirizacao,
           filtros_aplicados: filtrosAplicadosCarteira,
           configuracao_frota: frotaParaPayload,
         },
@@ -509,6 +537,9 @@ export function RoteirizacaoPage() {
               <h3 className="font-semibold text-gray-900">Configuração de Frota por Perfil</h3>
               {frotaLoading && <p className="text-sm text-gray-500">Carregando perfis...</p>}
               {!frotaLoading && perfisFrota.length === 0 && <p className="text-sm text-amber-700">Nenhum perfil de veículo ativo encontrado para a filial.</p>}
+              {!frotaLoading && perfisFrota.length > 0 && configuracaoFrota.length === 0 && (
+                <p className="text-sm text-amber-700">Informe quantidades válidas (&gt; 0) para pelo menos um perfil antes de roteirizar.</p>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {perfisFrota.map((perfil) => (
                   <div key={perfil} className="flex items-center justify-between border rounded-lg p-3"><span className="font-medium">{perfil}</span><input type="number" min={0} className="input w-28" value={quantidadePorPerfil[perfil] ?? 0} onChange={(e) => setQuantidadePorPerfil((prev) => ({ ...prev, [perfil]: Number(e.target.value || 0) }))} /></div>
