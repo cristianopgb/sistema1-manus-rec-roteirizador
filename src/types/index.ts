@@ -167,8 +167,8 @@ export interface PayloadMotor {
     perfil?: string | null
     placa?: string | null
     capacidade_peso_kg?: number | null
-    capacidade_volume_m3?: number | null
-    num_eixos?: number | null
+    capacidade_vol_m3?: number | null
+    qtd_eixos?: number | null
     max_km_distancia?: number | null
     max_entregas?: number | null
     ocupacao_minima_perc?: number | null
