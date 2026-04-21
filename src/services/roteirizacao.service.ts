@@ -91,9 +91,13 @@ const mapVeiculoToMotor = (veiculo: Record<string, unknown>) => ({
   tipo: typeof veiculo.tipo === 'string' ? veiculo.tipo : null,
   perfil: typeof veiculo.tipo === 'string' ? veiculo.tipo : null,
   placa: typeof veiculo.placa === 'string' ? veiculo.placa : null,
-  capacidade_peso_kg: typeof veiculo.capacidade_peso_kg === 'number' ? veiculo.capacidade_peso_kg : null,
-  capacidade_volume_m3: typeof veiculo.capacidade_volume_m3 === 'number' ? veiculo.capacidade_volume_m3 : null,
-  num_eixos: typeof veiculo.num_eixos === 'number' ? veiculo.num_eixos : null,
+  capacidade_peso_kg: typeof veiculo.capacidade_peso_kg === 'number' ? veiculo.capacidade_peso_kg : 0,
+  capacidade_vol_m3: typeof (veiculo.capacidade_vol_m3 ?? veiculo.capacidade_volume_m3) === 'number'
+    ? (veiculo.capacidade_vol_m3 ?? veiculo.capacidade_volume_m3) as number
+    : 0,
+  qtd_eixos: typeof (veiculo.qtd_eixos ?? veiculo.num_eixos) === 'number'
+    ? (veiculo.qtd_eixos ?? veiculo.num_eixos) as number
+    : 0,
   max_km_distancia: typeof veiculo.max_km_distancia === 'number' ? veiculo.max_km_distancia : null,
   max_entregas: typeof veiculo.max_entregas === 'number' ? veiculo.max_entregas : null,
   ocupacao_minima_perc: typeof veiculo.ocupacao_minima_perc === 'number' ? veiculo.ocupacao_minima_perc : null,
@@ -212,6 +216,10 @@ export const roteirizacaoService = {
     const veiculos = (veiculosData ?? []).map((item) => mapVeiculoToMotor(item as Record<string, unknown>))
     if (import.meta.env.DEV && veiculos.length === 0) {
       console.log('[MOTOR2] nenhum veículo ativo encontrado para a filial operacional:', filial.id)
+    }
+    if (import.meta.env.DEV) {
+      console.log('[MOTOR2] veiculos payload final:', veiculos)
+      console.log('[MOTOR2] primeiro veiculo serializado:', veiculos?.[0])
     }
     if (veiculos.length === 0) {
       throw new Error('Nenhum veículo ativo encontrado para a filial operacional selecionada.')
