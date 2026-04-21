@@ -160,11 +160,80 @@ export interface PayloadMotor {
   tipo_roteirizacao: TipoRoteirizacao
   filtros_aplicados: FiltrosCarteira
   configuracao_frota: ConfiguracaoFrotaItem[]
-  carteira: CarteiraCarga[]
+  filial: {
+    id: string
+    nome: string
+    cidade: string
+    uf: string
+    latitude: number
+    longitude: number
+  }
+  parametros: {
+    usuario_id: string
+    usuario_nome: string
+    filial_id: string
+    filial_nome: string
+    upload_id: string
+    rodada_id: string
+    data_execucao: string
+    data_base_roteirizacao: string
+    origem_sistema: 'sistema1'
+    modelo_roteirizacao: 'roteirizador_rec'
+    tipo_roteirizacao: TipoRoteirizacao
+    filtros_aplicados: FiltrosCarteira
+  }
+  carteira: CarteiraCargaContratoMotor[]
 }
 
 export interface CarteiraCarga {
   [key: string]: unknown
+}
+
+export interface CarteiraCargaContratoMotor {
+  [key: string]: unknown
+  'Filial R': unknown
+  Romane: unknown
+  'Filial D': unknown
+  'Série': unknown
+  'Nro Doc.': unknown
+  'Data Des': unknown
+  'Data NF': unknown
+  'D.L.E.': unknown
+  'Agendam.': unknown
+  Palet: unknown
+  Conf: unknown
+  Peso: unknown
+  'Vlr.Merc.': unknown
+  'Qtd.': unknown
+  'Peso Cub.': unknown
+  Classif: unknown
+  Tomad: unknown
+  Destin: unknown
+  Bairro: unknown
+  Cidad: unknown
+  UF: unknown
+  'NF / Serie': unknown
+  'Tipo Ca': unknown
+  'Qtd.NF': unknown
+  Mesoregião: unknown
+  'Sub-Região': unknown
+  'Ocorrências NF': unknown
+  Remetente: unknown
+  Observação: unknown
+  'Ref Cliente': unknown
+  'Cidade Dest.': unknown
+  Agenda: unknown
+  'Tipo Carga': unknown
+  'Última Ocorrência': unknown
+  'Status R': unknown
+  Latitude: unknown
+  Longitude: unknown
+  'Peso Calculo': unknown
+  Prioridade: unknown
+  'Restrição Veículo': unknown
+  'Carro Dedicado': unknown
+  'Inicio Ent.': unknown
+  'Fim En': unknown
 }
 
 // --- Resposta do Motor (Sistema 2) ---
