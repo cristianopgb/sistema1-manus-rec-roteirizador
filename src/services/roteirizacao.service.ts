@@ -9,7 +9,8 @@ import {
 import {
   PayloadMotor, RespostaMotor, ManifestoComFrete,
   RodadaRoteirizacao, FiltrosRoteirizacao, CarteiraCarga,
-  Filial, FiltrosCarteira, ConfiguracaoFrotaItem, CarteiraCargaContratoMotor
+  Filial, FiltrosCarteira, ConfiguracaoFrotaItem, CarteiraCargaContratoMotor,
+  ManifestoRoteirizacaoDetalhe, ManifestoItemRoteirizacao, RemanescenteRoteirizacao, EstatisticasRoteirizacao
 } from '@/types'
 import { normalizeHorarioJanela } from '@/lib/time-normalizers'
 
@@ -184,7 +185,160 @@ const extrairMensagemErro = (body: unknown): string => {
   return JSON.stringify(body)
 }
 
+const toNumber = (value: unknown, fallback = 0): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(',', '.'))
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return fallback
+}
+
+const toText = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null
+  const text = String(value).trim()
+  return text.length ? text : null
+}
+
+const pickFirstText = (...values: unknown[]): string | null => {
+  for (const value of values) {
+    const text = toText(value)
+    if (text) return text
+  }
+  return null
+}
+
 export const roteirizacaoService = {
+  async persistirEstruturaRodada(
+    rodadaId: string,
+    resposta: RespostaMotor,
+    veiculos: Array<{ id: string; perfil?: string | null; tipo?: string | null; qtd_eixos?: number | null }>
+  ): Promise<void> {
+    const manifestosFonte = (resposta.manifestos_m7?.length ? resposta.manifestos_m7 : resposta.manifestos) as Array<Record<string, unknown>>
+    const itensFonte = (resposta.itens_manifestos_sequenciados_m7?.length
+      ? resposta.itens_manifestos_sequenciados_m7
+      : resposta.manifestos.flatMap((m) => m.entregas.map((e) => ({ ...e, manifesto_id: m.id_manifesto })))
+    ) as Array<Record<string, unknown>>
+
+    const mapManifestoEixos = new Map<string, number | null>()
+    const mapManifestoVeiculoId = new Map<string, string | null>()
+    const registrosManifestos = manifestosFonte.map((manifestoRaw) => {
+      const manifestoId = pickFirstText(manifestoRaw.manifesto_id, manifestoRaw.id_manifesto, manifestoRaw.numero_manifesto) || crypto.randomUUID()
+      const veiculoId = pickFirstText(manifestoRaw.veiculo_id)
+      const veiculoPerfil = pickFirstText(manifestoRaw.veiculo_perfil, manifestoRaw.veiculo_codigo, manifestoRaw.perfil)
+      const veiculoMatch = veiculos.find((v) => v.id === veiculoId || (!!veiculoPerfil && (v.perfil === veiculoPerfil || v.tipo === veiculoPerfil)))
+      const qtdEixos = Number.isFinite(toNumber(manifestoRaw.qtd_eixos, NaN))
+        ? toNumber(manifestoRaw.qtd_eixos, 0)
+        : (veiculoMatch?.qtd_eixos ?? toNumber((manifestoRaw as any).num_eixos, 0))
+      mapManifestoEixos.set(manifestoId, qtdEixos || null)
+      mapManifestoVeiculoId.set(manifestoId, veiculoMatch?.id || veiculoId || null)
+      return {
+        rodada_id: rodadaId,
+        manifesto_id: manifestoId,
+        origem_modulo: pickFirstText(manifestoRaw.origem_modulo),
+        tipo_manifesto: pickFirstText(manifestoRaw.tipo_manifesto),
+        veiculo_perfil: veiculoPerfil,
+        veiculo_tipo: pickFirstText(manifestoRaw.veiculo_tipo),
+        veiculo_id: veiculoMatch?.id || veiculoId,
+        qtd_eixos: qtdEixos || null,
+        exclusivo_flag: Boolean(manifestoRaw.exclusivo_flag),
+        peso_total: toNumber(manifestoRaw.peso_total, toNumber((manifestoRaw as any).total_peso_kg, 0)),
+        km_total: toNumber(manifestoRaw.km_total, toNumber((manifestoRaw as any).km_estimado, 0)),
+        ocupacao: toNumber(manifestoRaw.ocupacao, toNumber((manifestoRaw as any).ocupacao_percentual, 0)),
+        qtd_entregas: Math.trunc(toNumber(manifestoRaw.qtd_entregas, toNumber((manifestoRaw as any).total_entregas, 0))),
+        qtd_clientes: Math.trunc(toNumber(manifestoRaw.qtd_clientes, 0)),
+      }
+    })
+
+    const eixosVeiculoMap = new Map<string, number>()
+    mapManifestoVeiculoId.forEach((veiculoId) => {
+      if (!veiculoId) return
+      const veiculo = veiculos.find((v) => v.id === veiculoId)
+      if (veiculo?.qtd_eixos) eixosVeiculoMap.set(veiculoId, veiculo.qtd_eixos)
+    })
+
+    const tabelaAntt = await anttService.listar()
+    const anttCargaGeral = tabelaAntt.filter((item) => item.codigo_tipo === 5)
+    const manifestosComFrete = registrosManifestos.map((registro) => {
+      const qtdEixos = registro.qtd_eixos ?? (registro.veiculo_id ? eixosVeiculoMap.get(registro.veiculo_id) ?? null : null)
+      const coef = anttCargaGeral.find((item) => item.num_eixos === qtdEixos)
+      return {
+        ...registro,
+        qtd_eixos: qtdEixos,
+        frete_minimo: anttService.calcularFreteMinimo(registro.km_total, coef?.coef_ccd ?? 0),
+      }
+    })
+
+    const itensFiltrados = itensFonte.filter((item) => {
+      const manifestoId = pickFirstText(item.manifesto_id, item.id_manifesto, item.numero_manifesto)
+      return !!manifestoId
+    })
+
+    const registrosItens = itensFiltrados.map((item, index) => {
+      const manifestoId = pickFirstText(item.manifesto_id, item.id_manifesto, item.numero_manifesto) || 'sem_manifesto'
+      const seq = Math.trunc(toNumber(item.sequencia, index + 1))
+      return {
+        rodada_id: rodadaId,
+        manifesto_id: manifestoId,
+        sequencia: seq > 0 ? seq : index + 1,
+        nro_documento: pickFirstText(item.nro_documento, item.nro_doc, item.doc_ctrc),
+        destinatario: pickFirstText(item.destinatario),
+        cidade: pickFirstText(item.cidade),
+        uf: pickFirstText(item.uf),
+        peso: toNumber(item.peso, toNumber(item.peso_kg, 0)),
+        distancia_km: toNumber(item.distancia_km, 0),
+        inicio_entrega: pickFirstText(item.inicio_entrega, item.hora_agenda),
+        fim_entrega: pickFirstText(item.fim_entrega),
+        latitude: toNumber(item.latitude, toNumber(item.latitude_destinatario, 0)) || null,
+        longitude: toNumber(item.longitude, toNumber(item.longitude_destinatario, 0)) || null,
+      }
+    })
+
+    const naoRoteirizados = resposta.nao_roteirizados ?? []
+    const registrosRemanescentes = naoRoteirizados.map((item) => ({
+      rodada_id: rodadaId,
+      nro_documento: pickFirstText(item.nro_documento),
+      destinatario: pickFirstText(item.destinatario),
+      cidade: pickFirstText(item.cidade),
+      uf: pickFirstText(item.uf),
+      motivo: pickFirstText(item.motivo),
+      etapa_origem: pickFirstText((item as unknown as Record<string, unknown>).etapa_origem, item.status_triagem),
+    }))
+
+    const resumoNegocio = (resposta.resumo_negocio ?? {}) as Record<string, unknown>
+    const resumoExecucao = (resposta.resumo_execucao ?? {}) as Record<string, unknown>
+    const registroEstatistica = {
+      rodada_id: rodadaId,
+      total_carteira: Math.trunc(toNumber(resumoNegocio.total_carteira, resposta.resumo.total_cargas_entrada)),
+      total_roteirizado: Math.trunc(toNumber(resumoNegocio.total_roteirizado, resposta.resumo.total_itens_manifestados)),
+      total_remanescente: Math.trunc(toNumber(resumoNegocio.total_remanescente, resposta.resumo.total_nao_roteirizados)),
+      total_manifestos: Math.trunc(toNumber(resumoNegocio.total_manifestos, resposta.resumo.total_manifestos)),
+      km_total: toNumber(resumoNegocio.km_total, resposta.resumo.km_total_frota),
+      ocupacao_media: toNumber(resumoNegocio.ocupacao_media, resposta.resumo.ocupacao_media_percentual),
+      tempo_execucao_ms: Math.trunc(toNumber(resumoExecucao.tempo_execucao_ms, resposta.resumo.tempo_processamento_ms)),
+    }
+
+    await supabase.from('manifestos_roteirizacao').delete().eq('rodada_id', rodadaId)
+    await supabase.from('manifestos_itens').delete().eq('rodada_id', rodadaId)
+    await supabase.from('remanescentes_roteirizacao').delete().eq('rodada_id', rodadaId)
+    await supabase.from('estatisticas_roteirizacao').delete().eq('rodada_id', rodadaId)
+
+    if (manifestosComFrete.length) {
+      const { error } = await supabase.from('manifestos_roteirizacao').insert(manifestosComFrete)
+      if (error) throw error
+    }
+    if (registrosItens.length) {
+      const { error } = await supabase.from('manifestos_itens').insert(registrosItens)
+      if (error) throw error
+    }
+    if (registrosRemanescentes.length) {
+      const { error } = await supabase.from('remanescentes_roteirizacao').insert(registrosRemanescentes)
+      if (error) throw error
+    }
+    const { error: estError } = await supabase.from('estatisticas_roteirizacao').upsert(registroEstatistica)
+    if (estError) throw estError
+  },
+
   async buscarCarteiraFiltrada(uploadId: string, filtros?: FiltrosCarteira): Promise<CarteiraCarga[]> {
     const baseQuery = supabase
       .from('carteira_itens')
@@ -400,7 +554,7 @@ export const roteirizacaoService = {
       throw new Error(resposta.erro?.mensagem || 'O motor retornou um erro desconhecido')
     }
 
-    // 3. Calcular frete mínimo ANTT para cada manifesto
+    // 3. Calcular frete mínimo ANTT para cada manifesto (somente deslocamento da categoria Carga geral)
     const tabelaAntt = await anttService.listar()
     const manifestosComFrete: ManifestoComFrete[] = await Promise.all(
       resposta.manifestos.map(async (manifesto) => {
@@ -412,24 +566,21 @@ export const roteirizacaoService = {
         )
 
         const coefDeslocamento = coef?.coef_ccd || 0
-        const coefCargaDescarga = coef?.coef_cc || 0
-        const freteMinimo = anttService.calcularFreteMinimo(
-          manifesto.km_estimado,
-          coefDeslocamento,
-          coefCargaDescarga
-        )
+        const freteMinimo = anttService.calcularFreteMinimo(manifesto.km_estimado, coefDeslocamento)
 
         return {
           ...manifesto,
           frete_minimo_antt: freteMinimo,
           tipo_carga_antt: String(tipoCargaId),
           coeficiente_deslocamento: coefDeslocamento,
-          coeficiente_carga_descarga: coefCargaDescarga,
+          coeficiente_carga_descarga: 0,
           aprovado: false,
           excluido: false,
         }
       })
     )
+
+    await this.persistirEstruturaRodada(rodadaId, resposta, veiculos)
 
     // 4. Salvar rodada no Supabase
     const tempoMs = Date.now() - inicio
@@ -508,6 +659,71 @@ export const roteirizacaoService = {
       filial_nome: (data.filiais as { nome: string } | null)?.nome,
       usuario_nome: data.usuario_nome,
     } as RodadaRoteirizacao
+  },
+
+  async buscarDetalhesAprovacao(rodadaId: string): Promise<{
+    manifestos: ManifestoRoteirizacaoDetalhe[]
+    remanescentes: RemanescenteRoteirizacao[]
+    estatisticas: EstatisticasRoteirizacao | null
+  }> {
+    const [manifestosRes, remanescentesRes, estatisticasRes] = await Promise.all([
+      supabase.from('manifestos_roteirizacao').select('*').eq('rodada_id', rodadaId).order('manifesto_id'),
+      supabase.from('remanescentes_roteirizacao').select('*').eq('rodada_id', rodadaId).order('created_at'),
+      supabase.from('estatisticas_roteirizacao').select('*').eq('rodada_id', rodadaId).maybeSingle(),
+    ])
+
+    if (manifestosRes.error) throw manifestosRes.error
+    if (remanescentesRes.error) throw remanescentesRes.error
+    if (estatisticasRes.error) throw estatisticasRes.error
+
+    return {
+      manifestos: (manifestosRes.data ?? []) as ManifestoRoteirizacaoDetalhe[],
+      remanescentes: (remanescentesRes.data ?? []) as RemanescenteRoteirizacao[],
+      estatisticas: (estatisticasRes.data as EstatisticasRoteirizacao | null) ?? null,
+    }
+  },
+
+  async buscarManifestoOperacional(rodadaId: string, manifestoId: string): Promise<{
+    manifesto: ManifestoRoteirizacaoDetalhe | null
+    itens: ManifestoItemRoteirizacao[]
+  }> {
+    const [manifestoRes, itensRes] = await Promise.all([
+      supabase
+        .from('manifestos_roteirizacao')
+        .select('*')
+        .eq('rodada_id', rodadaId)
+        .eq('manifesto_id', manifestoId)
+        .maybeSingle(),
+      supabase
+        .from('manifestos_itens')
+        .select('*')
+        .eq('rodada_id', rodadaId)
+        .eq('manifesto_id', manifestoId)
+        .order('sequencia'),
+    ])
+    if (manifestoRes.error) throw manifestoRes.error
+    if (itensRes.error) throw itensRes.error
+    return {
+      manifesto: (manifestoRes.data as ManifestoRoteirizacaoDetalhe | null) ?? null,
+      itens: (itensRes.data ?? []) as ManifestoItemRoteirizacao[],
+    }
+  },
+
+  async salvarOrdemManifestoItens(rodadaId: string, manifestoId: string, itens: ManifestoItemRoteirizacao[]): Promise<void> {
+    const updates = itens
+      .sort((a, b) => a.sequencia - b.sequencia)
+      .map((item, index) =>
+        supabase
+          .from('manifestos_itens')
+          .update({ sequencia: index + 1, updated_at: new Date().toISOString() })
+          .eq('id', item.id)
+          .eq('rodada_id', rodadaId)
+          .eq('manifesto_id', manifestoId)
+      )
+
+    const resultados = await Promise.all(updates)
+    const erro = resultados.find((res) => res.error)?.error
+    if (erro) throw erro
   },
 
   async verificarMotor(): Promise<boolean> {

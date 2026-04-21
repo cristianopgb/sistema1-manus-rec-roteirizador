@@ -256,13 +256,52 @@ export interface RespostaMotor {
   status: 'sucesso' | 'erro' | 'parcial'
   erro?: { codigo: string; mensagem: string } | null
   resumo: ResumoMotor
+  resumo_execucao?: Record<string, unknown>
+  resumo_negocio?: Record<string, unknown>
   encadeamento: EtapaPipeline[]
   manifestos: ManifestoMotor[]
+  manifestos_m7?: ManifestoMotorEstruturado[]
+  itens_manifestos_sequenciados_m7?: ItemManifestoEstruturado[]
   nao_roteirizados: CargaNaoRoteirizada[]
   cargas_agendamento_futuro: CargaNaoRoteirizada[]
   cargas_agenda_vencida: CargaNaoRoteirizada[]
   cargas_excecao_triagem: CargaNaoRoteirizada[]
   cargas_nao_alocadas: CargaNaoRoteirizada[]
+}
+
+export interface ManifestoMotorEstruturado {
+  manifesto_id?: string
+  id_manifesto?: string
+  origem_modulo?: string
+  tipo_manifesto?: string
+  veiculo_perfil?: string
+  veiculo_tipo?: string
+  veiculo_id?: string | null
+  qtd_eixos?: number | null
+  exclusivo_flag?: boolean
+  peso_total?: number
+  km_total?: number
+  ocupacao?: number
+  qtd_entregas?: number
+  qtd_clientes?: number
+  [key: string]: unknown
+}
+
+export interface ItemManifestoEstruturado {
+  manifesto_id?: string
+  id_manifesto?: string
+  sequencia?: number
+  nro_documento?: string
+  destinatario?: string
+  cidade?: string
+  uf?: string
+  peso?: number
+  distancia_km?: number
+  inicio_entrega?: string | null
+  fim_entrega?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  [key: string]: unknown
 }
 
 export interface ResumoMotor {
@@ -389,6 +428,71 @@ export interface ManifestoComFrete extends ManifestoMotor {
   coeficiente_carga_descarga?: number
   aprovado: boolean
   excluido: boolean
+}
+
+export interface ManifestoRoteirizacaoDetalhe {
+  id: string
+  rodada_id: string
+  manifesto_id: string
+  origem_modulo: string | null
+  tipo_manifesto: string | null
+  veiculo_perfil: string | null
+  veiculo_tipo: string | null
+  veiculo_id: string | null
+  qtd_eixos: number | null
+  exclusivo_flag: boolean
+  peso_total: number
+  km_total: number
+  ocupacao: number
+  qtd_entregas: number
+  qtd_clientes: number
+  frete_minimo: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ManifestoItemRoteirizacao {
+  id: string
+  rodada_id: string
+  manifesto_id: string
+  sequencia: number
+  nro_documento: string | null
+  destinatario: string | null
+  cidade: string | null
+  uf: string | null
+  peso: number | null
+  distancia_km: number | null
+  inicio_entrega: string | null
+  fim_entrega: string | null
+  latitude: number | null
+  longitude: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface RemanescenteRoteirizacao {
+  id: string
+  rodada_id: string
+  nro_documento: string | null
+  destinatario: string | null
+  cidade: string | null
+  uf: string | null
+  motivo: string | null
+  etapa_origem: string | null
+  created_at: string
+}
+
+export interface EstatisticasRoteirizacao {
+  rodada_id: string
+  total_carteira: number
+  total_roteirizado: number
+  total_remanescente: number
+  total_manifestos: number
+  km_total: number
+  ocupacao_media: number
+  tempo_execucao_ms: number
+  created_at: string
+  updated_at: string
 }
 
 // --- Estado da Tela de Roteirização ---

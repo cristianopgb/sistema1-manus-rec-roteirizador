@@ -33,7 +33,7 @@ const navItems: (NavItem | NavGroup)[] = [
     icon: <Route size={18} />,
   },
   {
-    label: 'Histórico',
+    label: 'Aprovar Roteirização',
     to: '/historico',
     icon: <History size={18} />,
   },
