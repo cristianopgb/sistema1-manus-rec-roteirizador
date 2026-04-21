@@ -11,7 +11,7 @@ import {
   RodadaRoteirizacao, FiltrosRoteirizacao, CarteiraCarga,
   Filial, FiltrosCarteira, ConfiguracaoFrotaItem, CarteiraCargaContratoMotor
 } from '@/types'
-import { normalizeInicioEntrega } from '@/lib/time-normalizers'
+import { normalizeHorarioJanela } from '@/lib/time-normalizers'
 
 const CAMPOS_MULTISELECT: Array<keyof Pick<FiltrosCarteira, 'filial_r' | 'uf' | 'destin' | 'cidade' | 'tomad' | 'mesoregiao' | 'prioridade' | 'restricao_veiculo'>> = [
   'filial_r',
@@ -107,12 +107,18 @@ const mapVeiculoToMotor = (veiculo: Record<string, unknown>) => ({
 })
 
 const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): CarteiraCargaContratoMotor => {
-  const inicioEntregaNormalizado = normalizeInicioEntrega(item.inicio_entrega)
+  const inicioEntregaNormalizado = normalizeHorarioJanela(item.inicio_entrega)
+  const fimEnNormalizado = normalizeHorarioJanela(item.fim_entrega)
   if (import.meta.env.DEV) {
     console.log('[PAYLOAD] Inicio Ent. original:', item.inicio_entrega)
     console.log('[PAYLOAD] Inicio Ent. normalizado:', inicioEntregaNormalizado)
+    console.log('[PAYLOAD] Fim En original:', item.fim_entrega)
+    console.log('[PAYLOAD] Fim En normalizado:', fimEnNormalizado)
     if (item.inicio_entrega !== null && item.inicio_entrega !== undefined && inicioEntregaNormalizado === null) {
       console.log('[PAYLOAD] Inicio Ent. inválido convertido para null no índice:', index, 'item_id:', item._carteira_item_id)
+    }
+    if (item.fim_entrega !== null && item.fim_entrega !== undefined && fimEnNormalizado === null) {
+      console.log('[PAYLOAD] Fim En inválido convertido para null no índice:', index, 'item_id:', item._carteira_item_id)
     }
   }
 
@@ -159,7 +165,7 @@ const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): Car
   'Restrição Veículo': item.restricao_veiculo,
   'Carro Dedicado': item.carro_dedicado,
   'Inicio Ent.': inicioEntregaNormalizado,
-  'Fim En': item.fim_entrega,
+  'Fim En': fimEnNormalizado,
 })
 }
 

@@ -29,12 +29,12 @@ const normalizeTimeString = (rawValue: string): string | null => {
 }
 
 /**
- * Normaliza o campo "Inicio Ent." para o contrato aceito pelo motor:
+ * Normaliza campos de horário de janela para o contrato aceito pelo motor:
  * - HH:MM
  * - HH:MM:SS
  * - null
  */
-export const normalizeInicioEntrega = (value: unknown): string | null => {
+export const normalizeHorarioJanela = (value: unknown): string | null => {
   if (value === null || value === undefined) return null
 
   if (typeof value === 'number') {
@@ -48,3 +48,5 @@ export const normalizeInicioEntrega = (value: unknown): string | null => {
 
   return normalizeTimeString(raw)
 }
+
+export const normalizeInicioEntrega = normalizeHorarioJanela
