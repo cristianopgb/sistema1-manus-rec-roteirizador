@@ -160,6 +160,21 @@ export interface PayloadMotor {
   tipo_roteirizacao: TipoRoteirizacao
   filtros_aplicados: FiltrosCarteira
   configuracao_frota: ConfiguracaoFrotaItem[]
+  veiculos: Array<{
+    id: string
+    filial_id: string
+    tipo?: string | null
+    perfil?: string | null
+    placa?: string | null
+    capacidade_peso_kg?: number | null
+    capacidade_volume_m3?: number | null
+    num_eixos?: number | null
+    max_km_distancia?: number | null
+    max_entregas?: number | null
+    ocupacao_minima_perc?: number | null
+    ocupacao_maxima_perc?: number | null
+    ativo: boolean
+  }>
   filial: {
     id: string
     nome: string

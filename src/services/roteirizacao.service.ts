@@ -85,6 +85,22 @@ const toIsoCompleto = (value: string): string => {
   return parsed.toISOString()
 }
 
+const mapVeiculoToMotor = (veiculo: Record<string, unknown>) => ({
+  id: String(veiculo.id ?? ''),
+  filial_id: String(veiculo.filial_id ?? ''),
+  tipo: typeof veiculo.tipo === 'string' ? veiculo.tipo : null,
+  perfil: typeof veiculo.tipo === 'string' ? veiculo.tipo : null,
+  placa: typeof veiculo.placa === 'string' ? veiculo.placa : null,
+  capacidade_peso_kg: typeof veiculo.capacidade_peso_kg === 'number' ? veiculo.capacidade_peso_kg : null,
+  capacidade_volume_m3: typeof veiculo.capacidade_volume_m3 === 'number' ? veiculo.capacidade_volume_m3 : null,
+  num_eixos: typeof veiculo.num_eixos === 'number' ? veiculo.num_eixos : null,
+  max_km_distancia: typeof veiculo.max_km_distancia === 'number' ? veiculo.max_km_distancia : null,
+  max_entregas: typeof veiculo.max_entregas === 'number' ? veiculo.max_entregas : null,
+  ocupacao_minima_perc: typeof veiculo.ocupacao_minima_perc === 'number' ? veiculo.ocupacao_minima_perc : null,
+  ocupacao_maxima_perc: typeof veiculo.ocupacao_maxima_perc === 'number' ? veiculo.ocupacao_maxima_perc : null,
+  ativo: veiculo.ativo === true,
+})
+
 const mapCarteiraItemToMotorContract = (item: CarteiraCarga): CarteiraCargaContratoMotor => ({
   'Filial R': item.filial_r,
   Romane: item.romane,
@@ -185,6 +201,21 @@ export const roteirizacaoService = {
     const dataBaseRoteirizacaoIso = toIsoCompleto(filtros.data_base)
     const dataExecucaoIso = new Date().toISOString()
     const carteiraContrato = carteira.map(mapCarteiraItemToMotorContract)
+    const { data: veiculosData, error: veiculosError } = await supabase
+      .from('veiculos')
+      .select('id, filial_id, tipo, placa, capacidade_peso_kg, capacidade_volume_m3, num_eixos, max_km_distancia, max_entregas, ocupacao_minima_perc, ocupacao_maxima_perc, ativo')
+      .eq('filial_id', filial.id)
+      .eq('ativo', true)
+      .order('tipo')
+
+    if (veiculosError) throw veiculosError
+    const veiculos = (veiculosData ?? []).map((item) => mapVeiculoToMotor(item as Record<string, unknown>))
+    if (import.meta.env.DEV && veiculos.length === 0) {
+      console.log('[MOTOR2] nenhum veículo ativo encontrado para a filial operacional:', filial.id)
+    }
+    if (veiculos.length === 0) {
+      throw new Error('Nenhum veículo ativo encontrado para a filial operacional selecionada.')
+    }
 
     const { data: usuarioPerfil } = await supabase
       .from('usuarios_perfil')
@@ -204,6 +235,7 @@ export const roteirizacaoService = {
       tipo_roteirizacao: filtros.tipo_roteirizacao,
       filtros_aplicados: filtros.filtros_aplicados,
       configuracao_frota: filtros.tipo_roteirizacao === 'frota' ? configuracaoFrota : [],
+      veiculos,
       filial: {
         id: filial.id,
         nome: filial.nome,
@@ -237,6 +269,7 @@ export const roteirizacaoService = {
       tipo_roteirizacao: filtros.tipo_roteirizacao,
       data_base_roteirizacao: dataBaseRoteirizacaoIso,
       total_carteira: carteiraContrato.length,
+      total_veiculos: veiculos.length,
     }
 
     const { error: rodadaInicialError } = await supabase
@@ -264,6 +297,10 @@ export const roteirizacaoService = {
     const finalUrl = buildMotor2Url(MOTOR_2_ROTEIRIZAR_PATH)
 
     if (import.meta.env.DEV) {
+      console.log('[ROTEIRIZACAO] tipo_roteirizacao salvo/enviado:', payload.tipo_roteirizacao)
+      console.log('[MOTOR2] veiculos enviados:', veiculos.length)
+      console.log('[MOTOR2] configuracao_frota enviada:', payload.configuracao_frota)
+      console.log('[MOTOR2] tipo_roteirizacao enviado:', payload.tipo_roteirizacao)
       console.log('[Motor2] Base URL:', motorBaseUrl)
       console.log('[Motor2] Path:', MOTOR_2_ROTEIRIZAR_PATH)
       console.log('[Motor2] Final URL:', finalUrl)
