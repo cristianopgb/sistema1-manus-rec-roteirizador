@@ -214,10 +214,12 @@ export const roteirizacaoService = {
     resposta: RespostaMotor,
     veiculos: Array<{ id: string; perfil?: string | null; tipo?: string | null; qtd_eixos?: number | null }>
   ): Promise<void> {
-    const manifestosFonte = (resposta.manifestos_m7?.length ? resposta.manifestos_m7 : resposta.manifestos) as Array<Record<string, unknown>>
+    console.log('[PERSISTENCIA] iniciando persistência estruturada da rodada', rodadaId)
+    const manifestosLegados = Array.isArray(resposta.manifestos) ? resposta.manifestos : []
+    const manifestosFonte = (resposta.manifestos_m7?.length ? resposta.manifestos_m7 : manifestosLegados) as Array<Record<string, unknown>>
     const itensFonte = (resposta.itens_manifestos_sequenciados_m7?.length
       ? resposta.itens_manifestos_sequenciados_m7
-      : resposta.manifestos.flatMap((m) => m.entregas.map((e) => ({ ...e, manifesto_id: m.id_manifesto })))
+      : manifestosLegados.flatMap((m) => m.entregas.map((e) => ({ ...e, manifesto_id: m.id_manifesto })))
     ) as Array<Record<string, unknown>>
 
     const mapManifestoEixos = new Map<string, number | null>()
@@ -327,16 +329,26 @@ export const roteirizacaoService = {
       const { error } = await supabase.from('manifestos_roteirizacao').insert(manifestosComFrete)
       if (error) throw error
     }
+    const totalManifestosSalvos = manifestosComFrete.length
+    console.log('[PERSISTENCIA] manifestos salvos:', totalManifestosSalvos)
+
     if (registrosItens.length) {
       const { error } = await supabase.from('manifestos_itens').insert(registrosItens)
       if (error) throw error
     }
+    const totalItensSalvos = registrosItens.length
+    console.log('[PERSISTENCIA] itens salvos:', totalItensSalvos)
+
     if (registrosRemanescentes.length) {
       const { error } = await supabase.from('remanescentes_roteirizacao').insert(registrosRemanescentes)
       if (error) throw error
     }
+    const totalRemanescentesSalvos = registrosRemanescentes.length
+    console.log('[PERSISTENCIA] remanescentes salvos:', totalRemanescentesSalvos)
+
     const { error: estError } = await supabase.from('estatisticas_roteirizacao').upsert(registroEstatistica)
     if (estError) throw estError
+    console.log('[PERSISTENCIA] estatisticas salvas para rodada:', rodadaId)
   },
 
   async buscarCarteiraFiltrada(uploadId: string, filtros?: FiltrosCarteira): Promise<CarteiraCarga[]> {
@@ -540,71 +552,103 @@ export const roteirizacaoService = {
       throw new Error(`Falha ao comunicar com o Motor de Roteirização: ${mensagem}`)
     }
 
-    if (resposta.status === 'erro') {
-      await supabase
-        .from('rodadas_roteirizacao')
-        .update({
-          status: 'erro',
-          erro_mensagem: resposta.erro?.mensagem || 'O motor retornou um erro desconhecido',
-          tempo_processamento_ms: Date.now() - inicio,
-          resposta_motor: resposta as unknown as Record<string, unknown>,
-          payload_enviado: payload as unknown as Record<string, unknown>,
-        })
-        .eq('id', rodadaId)
-      throw new Error(resposta.erro?.mensagem || 'O motor retornou um erro desconhecido')
+    console.log('[ROTEIRIZACAO] resposta HTTP recebida do motor')
+    console.log('[ROTEIRIZACAO] iniciando fluxo pós-retorno')
+    console.log('[ROTEIRIZACAO] chaves da resposta do motor:', Object.keys(resposta || {}))
+    console.log('[ROTEIRIZACAO] manifestos_m7:', resposta?.manifestos_m7?.length || 0)
+    console.log('[ROTEIRIZACAO] itens_manifestos_sequenciados_m7:', resposta?.itens_manifestos_sequenciados_m7?.length || 0)
+    console.log('[ROTEIRIZACAO] nao_roteirizados:', resposta?.nao_roteirizados?.length || 0)
+
+    const manifestosResposta = Array.isArray(resposta.manifestos) ? resposta.manifestos : []
+    const resumoResposta = resposta.resumo ?? {
+      total_cargas_entrada: 0,
+      total_manifestos: 0,
+      total_itens_manifestados: 0,
+      total_nao_roteirizados: 0,
+      km_total_frota: 0,
+      ocupacao_media_percentual: 0,
+      tempo_processamento_ms: 0,
     }
 
-    // 3. Calcular frete mínimo ANTT para cada manifesto (somente deslocamento da categoria Carga geral)
-    const tabelaAntt = await anttService.listar()
-    const manifestosComFrete: ManifestoComFrete[] = await Promise.all(
-      resposta.manifestos.map(async (manifesto) => {
-        const tipoCargaId = 5
-        const numEixos = manifesto.num_eixos || 2
+    let statusFinal: RodadaRoteirizacao['status'] = 'erro'
+    let erroPosRetorno: string | null = null
+    let rodadaData: { id?: string } | null = null
+    let manifestosComFrete: ManifestoComFrete[] = []
 
-        const coef = tabelaAntt.find(
-          (t) => t.codigo_tipo === tipoCargaId && t.num_eixos === numEixos
-        )
+    try {
+      if (resposta.status === 'erro') {
+        throw new Error(resposta.erro?.mensagem || 'O motor retornou um erro desconhecido')
+      }
 
-        const coefDeslocamento = coef?.coef_ccd || 0
-        const freteMinimo = anttService.calcularFreteMinimo(manifesto.km_estimado, coefDeslocamento)
+      // 3. Calcular frete mínimo ANTT para cada manifesto (somente deslocamento da categoria Carga geral)
+      const tabelaAntt = await anttService.listar()
+      manifestosComFrete = await Promise.all(
+        manifestosResposta.map(async (manifesto) => {
+          const tipoCargaId = 5
+          const numEixos = manifesto.num_eixos || 2
 
-        return {
-          ...manifesto,
-          frete_minimo_antt: freteMinimo,
-          tipo_carga_antt: String(tipoCargaId),
-          coeficiente_deslocamento: coefDeslocamento,
-          coeficiente_carga_descarga: 0,
-          aprovado: false,
-          excluido: false,
-        }
-      })
-    )
+          const coef = tabelaAntt.find(
+            (t) => t.codigo_tipo === tipoCargaId && t.num_eixos === numEixos
+          )
 
-    await this.persistirEstruturaRodada(rodadaId, resposta, veiculos)
+          const coefDeslocamento = coef?.coef_ccd || 0
+          const freteMinimo = anttService.calcularFreteMinimo(manifesto.km_estimado, coefDeslocamento)
 
-    // 4. Salvar rodada no Supabase
-    const tempoMs = Date.now() - inicio
-    const { data: rodadaData, error: rodadaError } = await supabase
-      .from('rodadas_roteirizacao')
-      .update({
-        status: resposta.status,
-        total_cargas_entrada: resposta.resumo.total_cargas_entrada,
-        total_manifestos: resposta.resumo.total_manifestos,
-        total_itens_manifestados: resposta.resumo.total_itens_manifestados,
-        total_nao_roteirizados: resposta.resumo.total_nao_roteirizados,
-        km_total_frota: resposta.resumo.km_total_frota,
-        ocupacao_media_percentual: resposta.resumo.ocupacao_media_percentual,
+          return {
+            ...manifesto,
+            frete_minimo_antt: freteMinimo,
+            tipo_carga_antt: String(tipoCargaId),
+            coeficiente_deslocamento: coefDeslocamento,
+            coeficiente_carga_descarga: 0,
+            aprovado: false,
+            excluido: false,
+          }
+        })
+      )
+
+      await this.persistirEstruturaRodada(rodadaId, resposta, veiculos)
+      statusFinal = resposta.status as RodadaRoteirizacao['status']
+    } catch (erro) {
+      console.error('[ROTEIRIZACAO] erro no fluxo pós-retorno', erro)
+      erroPosRetorno = erro instanceof Error ? erro.message : 'Erro desconhecido no pós-retorno da roteirização'
+      statusFinal = 'erro'
+    } finally {
+      const tempoMs = Date.now() - inicio
+      const rodadaPayload = {
+        status: statusFinal,
+        total_cargas_entrada: resumoResposta.total_cargas_entrada,
+        total_manifestos: resumoResposta.total_manifestos,
+        total_itens_manifestados: resumoResposta.total_itens_manifestados,
+        total_nao_roteirizados: resumoResposta.total_nao_roteirizados,
+        km_total_frota: resumoResposta.km_total_frota,
+        ocupacao_media_percentual: resumoResposta.ocupacao_media_percentual,
         tempo_processamento_ms: tempoMs,
         payload_enviado: payload as unknown as Record<string, unknown>,
         resposta_motor: resposta as unknown as Record<string, unknown>,
-      })
-      .eq('id', rodadaId)
-      .select()
-      .single()
+        erro_mensagem: statusFinal === 'erro' ? (erroPosRetorno || resposta.erro?.mensagem || 'Erro no pós-processamento') : null,
+      }
 
-    if (rodadaError) {
-      console.error('Erro ao salvar rodada:', rodadaError)
+      const { data, error: rodadaError } = await supabase
+        .from('rodadas_roteirizacao')
+        .update(rodadaPayload)
+        .eq('id', rodadaId)
+        .select()
+        .single()
+
+      if (rodadaError) {
+        console.error('Erro ao salvar rodada:', rodadaError)
+      }
+
+      console.log('[ROTEIRIZACAO] rodada finalizada com status:', statusFinal)
+      console.log('[ROTEIRIZACAO] rodada atualizada:', rodadaId)
+      rodadaData = data as { id?: string } | null
     }
+
+    if (statusFinal === 'erro') {
+      throw new Error(erroPosRetorno || resposta.erro?.mensagem || 'O fluxo pós-retorno falhou')
+    }
+
+    const tempoMs = Date.now() - inicio
 
     const rodada: RodadaRoteirizacao = {
       id: rodadaData?.id || rodadaId,
@@ -612,14 +656,14 @@ export const roteirizacaoService = {
       filial_nome: filial.nome,
       usuario_id: usuarioId,
       upload_id: uploadId,
-      status: resposta.status as RodadaRoteirizacao['status'],
+      status: statusFinal,
       tipo_roteirizacao: filtros.tipo_roteirizacao,
-      total_cargas_entrada: resposta.resumo.total_cargas_entrada,
-      total_manifestos: resposta.resumo.total_manifestos,
-      total_itens_manifestados: resposta.resumo.total_itens_manifestados,
-      total_nao_roteirizados: resposta.resumo.total_nao_roteirizados,
-      km_total_frota: resposta.resumo.km_total_frota,
-      ocupacao_media_percentual: resposta.resumo.ocupacao_media_percentual,
+      total_cargas_entrada: resumoResposta.total_cargas_entrada,
+      total_manifestos: resumoResposta.total_manifestos,
+      total_itens_manifestados: resumoResposta.total_itens_manifestados,
+      total_nao_roteirizados: resumoResposta.total_nao_roteirizados,
+      km_total_frota: resumoResposta.km_total_frota,
+      ocupacao_media_percentual: resumoResposta.ocupacao_media_percentual,
       tempo_processamento_ms: tempoMs,
       resposta_motor: resposta,
       created_at: new Date().toISOString(),
