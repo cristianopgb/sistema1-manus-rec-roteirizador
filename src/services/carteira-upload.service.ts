@@ -147,12 +147,35 @@ const isLinhaCarteiraSemConteudo = (row: Record<string, unknown>): boolean => {
 
 const parseNumeric = (value: unknown): number | null => {
   if (value === null || value === undefined) return null
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
   const text = String(value).trim()
   if (!text) return null
-  const normalized = text
-    .replace(/\./g, '')
-    .replace(',', '.')
-    .replace(/[^\d.-]/g, '')
+  const sanitized = text.replace(/[^\d,.-]/g, '')
+  if (!sanitized) return null
+
+  const lastComma = sanitized.lastIndexOf(',')
+  const lastDot = sanitized.lastIndexOf('.')
+
+  let normalized = sanitized
+
+  if (lastComma >= 0 && lastDot >= 0) {
+    if (lastComma > lastDot) {
+      normalized = sanitized.replace(/\./g, '').replace(',', '.')
+    } else {
+      normalized = sanitized.replace(/,/g, '')
+    }
+  } else if (lastComma >= 0) {
+    const digitsAfterComma = sanitized.length - lastComma - 1
+    const digitsBeforeComma = sanitized.slice(0, lastComma).replace('-', '').length
+    if (digitsAfterComma === 3 && digitsBeforeComma > 3 && sanitized.indexOf(',') === lastComma) {
+      normalized = sanitized.replace(',', '')
+    } else {
+      normalized = sanitized.replace(',', '.')
+    }
+  }
+
   if (!normalized) return null
   const numeric = Number(normalized)
   return Number.isFinite(numeric) ? numeric : null
@@ -266,7 +289,7 @@ export const carteiraUploadService = {
     const worksheet = workbook.Sheets[sheetName]
     const rows = XLSX.utils.sheet_to_json(worksheet, {
       header: 1,
-      raw: false,
+      raw: true,
       defval: null,
       blankrows: false,
     }) as unknown[][]
