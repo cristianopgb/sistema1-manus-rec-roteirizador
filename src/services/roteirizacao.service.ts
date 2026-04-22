@@ -259,6 +259,103 @@ const pickFirstText = (...values: unknown[]): string | null => {
   return null
 }
 
+const toRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+const toRecordArray = (value: unknown): Array<Record<string, unknown>> => {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => toRecord(item))
+    .filter((item): item is Record<string, unknown> => !!item)
+}
+
+const extrairManifestosResposta = (resposta: RespostaMotor): Array<Record<string, unknown>> => {
+  const manifestosFechados = toRecordArray(resposta.manifestos_fechados)
+  const manifestosCompostos = toRecordArray(resposta.manifestos_compostos)
+  const manifestosResultado = toRecordArray(resposta.resultado_roteirizacao)
+  const manifestosM7 = toRecordArray(resposta.manifestos_m7)
+  const manifestosLegados = Array.isArray(resposta.manifestos)
+    ? resposta.manifestos.map((item) => item as unknown as Record<string, unknown>)
+    : []
+
+  const manifestos = [
+    ...manifestosFechados,
+    ...manifestosCompostos,
+    ...manifestosResultado,
+  ]
+
+  return manifestos.length ? manifestos : (manifestosM7.length ? manifestosM7 : manifestosLegados)
+}
+
+const extrairItensManifestoRaw = (manifestoRaw: Record<string, unknown>): Array<Record<string, unknown>> => {
+  const colecoes = [
+    manifestoRaw.itens,
+    manifestoRaw.entregas,
+    manifestoRaw.documentos,
+    manifestoRaw.lista_documentos,
+    manifestoRaw.lista_entregas,
+  ]
+
+  for (const colecao of colecoes) {
+    const itens = toRecordArray(colecao)
+    if (itens.length) return itens
+  }
+
+  return []
+}
+
+const extrairItensResposta = (
+  resposta: RespostaMotor,
+  manifestosFonte: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> => {
+  const itensM7 = toRecordArray(resposta.itens_manifestos_sequenciados_m7)
+  const itensResultado = toRecordArray(resposta.itens_manifestos)
+  if (itensM7.length || itensResultado.length) {
+    return [...itensM7, ...itensResultado]
+  }
+
+  return manifestosFonte.flatMap((manifestoRaw) => {
+    const manifestoId = pickFirstText(manifestoRaw.manifesto_id, manifestoRaw.id_manifesto, manifestoRaw.numero_manifesto)
+    const itensManifesto = extrairItensManifestoRaw(manifestoRaw)
+    return itensManifesto.map((item) => ({ ...item, manifesto_id: manifestoId ?? item.manifesto_id ?? item.id_manifesto }))
+  })
+}
+
+const extrairResumoRodada = (resposta: RespostaMotor, manifestosTotal: number, itensTotal: number, remanescentesTotal: number) => {
+  const resumo = toRecord(resposta.resumo) ?? {}
+  const resumoNegocio = toRecord(resposta.resumo_negocio) ?? {}
+  const resumoExecucao = toRecord(resposta.resumo_execucao) ?? {}
+  const logsPipeline = toRecordArray(resposta.logs_pipeline)
+  const totalCarteiraLogs = logsPipeline.reduce((acc, item) => {
+    const entrada = toNumber(item.entrada, 0)
+    return entrada > 0 ? Math.max(acc, entrada) : acc
+  }, 0)
+
+  return {
+    total_cargas_entrada: Math.trunc(toNumber(
+      resumo.total_cargas_entrada,
+      toNumber(resumoNegocio.total_carteira, totalCarteiraLogs),
+    )),
+    total_manifestos: Math.trunc(toNumber(
+      resumo.total_manifestos,
+      toNumber(resumoNegocio.total_manifestos, manifestosTotal),
+    )),
+    total_itens_manifestados: Math.trunc(toNumber(
+      resumo.total_itens_manifestados,
+      toNumber(resumoNegocio.total_roteirizado, itensTotal),
+    )),
+    total_nao_roteirizados: Math.trunc(toNumber(
+      resumo.total_nao_roteirizados,
+      toNumber(resumoNegocio.total_remanescente, remanescentesTotal),
+    )),
+    km_total_frota: toNumber(resumo.km_total_frota, toNumber(resumoNegocio.km_total, 0)),
+    ocupacao_media_percentual: toNumber(resumo.ocupacao_media_percentual, toNumber(resumoNegocio.ocupacao_media, 0)),
+    tempo_processamento_ms: Math.trunc(toNumber(resumo.tempo_processamento_ms, toNumber(resumoExecucao.tempo_execucao_ms, 0))),
+  }
+}
+
 export const roteirizacaoService = {
   async persistirEstruturaRodada(
     rodadaId: string,
@@ -266,12 +363,13 @@ export const roteirizacaoService = {
     veiculos: Array<{ id: string; perfil?: string | null; tipo?: string | null; qtd_eixos?: number | null }>
   ): Promise<void> {
     console.log('[PERSISTENCIA] iniciando persistência estruturada da rodada', rodadaId)
-    const manifestosLegados = Array.isArray(resposta.manifestos) ? resposta.manifestos : []
-    const manifestosFonte = (resposta.manifestos_m7?.length ? resposta.manifestos_m7 : manifestosLegados) as Array<Record<string, unknown>>
-    const itensFonte = (resposta.itens_manifestos_sequenciados_m7?.length
-      ? resposta.itens_manifestos_sequenciados_m7
-      : manifestosLegados.flatMap((m) => m.entregas.map((e) => ({ ...e, manifesto_id: m.id_manifesto })))
-    ) as Array<Record<string, unknown>>
+    const manifestosFechados = toRecordArray(resposta.manifestos_fechados)
+    const manifestosCompostos = toRecordArray(resposta.manifestos_compostos)
+    const manifestosFonte = extrairManifestosResposta(resposta)
+    const itensFonte = extrairItensResposta(resposta, manifestosFonte)
+    console.log('[EXTRACTOR] manifestos_fechados:', manifestosFechados.length)
+    console.log('[EXTRACTOR] manifestos_compostos:', manifestosCompostos.length)
+    console.log('[EXTRACTOR] total manifestos final:', manifestosFonte.length)
 
     const mapManifestoEixos = new Map<string, number | null>()
     const mapManifestoVeiculoId = new Map<string, string | null>()
@@ -347,7 +445,8 @@ export const roteirizacaoService = {
       }
     })
 
-    const naoRoteirizados = resposta.nao_roteirizados ?? []
+    const naoRoteirizados = Array.isArray(resposta.nao_roteirizados) ? resposta.nao_roteirizados : []
+    console.log('[EXTRACTOR] remanescentes:', naoRoteirizados.length)
     const registrosRemanescentes = naoRoteirizados.map((item) => ({
       rodada_id: rodadaId,
       nro_documento: pickFirstText(item.nro_documento),
@@ -358,17 +457,21 @@ export const roteirizacaoService = {
       etapa_origem: pickFirstText((item as unknown as Record<string, unknown>).etapa_origem, item.status_triagem),
     }))
 
-    const resumoNegocio = (resposta.resumo_negocio ?? {}) as Record<string, unknown>
-    const resumoExecucao = (resposta.resumo_execucao ?? {}) as Record<string, unknown>
+    const resumoRodada = extrairResumoRodada(
+      resposta,
+      manifestosComFrete.length,
+      registrosItens.length,
+      registrosRemanescentes.length,
+    )
     const registroEstatistica = {
       rodada_id: rodadaId,
-      total_carteira: Math.trunc(toNumber(resumoNegocio.total_carteira, resposta.resumo.total_cargas_entrada)),
-      total_roteirizado: Math.trunc(toNumber(resumoNegocio.total_roteirizado, resposta.resumo.total_itens_manifestados)),
-      total_remanescente: Math.trunc(toNumber(resumoNegocio.total_remanescente, resposta.resumo.total_nao_roteirizados)),
-      total_manifestos: Math.trunc(toNumber(resumoNegocio.total_manifestos, resposta.resumo.total_manifestos)),
-      km_total: toNumber(resumoNegocio.km_total, resposta.resumo.km_total_frota),
-      ocupacao_media: toNumber(resumoNegocio.ocupacao_media, resposta.resumo.ocupacao_media_percentual),
-      tempo_execucao_ms: Math.trunc(toNumber(resumoExecucao.tempo_execucao_ms, resposta.resumo.tempo_processamento_ms)),
+      total_carteira: resumoRodada.total_cargas_entrada,
+      total_roteirizado: resumoRodada.total_itens_manifestados,
+      total_remanescente: resumoRodada.total_nao_roteirizados,
+      total_manifestos: resumoRodada.total_manifestos,
+      km_total: resumoRodada.km_total_frota,
+      ocupacao_media: resumoRodada.ocupacao_media_percentual,
+      tempo_execucao_ms: resumoRodada.tempo_processamento_ms,
     }
 
     await supabase.from('manifestos_roteirizacao').delete().eq('rodada_id', rodadaId)
@@ -621,18 +724,20 @@ export const roteirizacaoService = {
     console.log('[ROTEIRIZACAO] chaves da resposta do motor:', Object.keys(resposta || {}))
     console.log('[ROTEIRIZACAO] manifestos_m7:', resposta?.manifestos_m7?.length || 0)
     console.log('[ROTEIRIZACAO] itens_manifestos_sequenciados_m7:', resposta?.itens_manifestos_sequenciados_m7?.length || 0)
+    console.log('[ROTEIRIZACAO] manifestos_fechados:', toRecordArray(resposta.manifestos_fechados).length)
+    console.log('[ROTEIRIZACAO] manifestos_compostos:', toRecordArray(resposta.manifestos_compostos).length)
     console.log('[ROTEIRIZACAO] nao_roteirizados:', resposta?.nao_roteirizados?.length || 0)
 
     const manifestosResposta = Array.isArray(resposta.manifestos) ? resposta.manifestos : []
-    const resumoResposta = resposta.resumo ?? {
-      total_cargas_entrada: 0,
-      total_manifestos: 0,
-      total_itens_manifestados: 0,
-      total_nao_roteirizados: 0,
-      km_total_frota: 0,
-      ocupacao_media_percentual: 0,
-      tempo_processamento_ms: 0,
-    }
+    const manifestosEstruturados = extrairManifestosResposta(resposta)
+    const itensEstruturados = extrairItensResposta(resposta, manifestosEstruturados)
+    const remanescentes = Array.isArray(resposta.nao_roteirizados) ? resposta.nao_roteirizados.length : 0
+    const resumoResposta = extrairResumoRodada(
+      resposta,
+      manifestosEstruturados.length,
+      itensEstruturados.length,
+      remanescentes,
+    )
 
     let statusFinal: RodadaRoteirizacao['status'] = 'erro'
     let erroPosRetorno: string | null = null
