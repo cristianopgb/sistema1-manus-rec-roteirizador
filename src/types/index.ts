@@ -256,6 +256,11 @@ export interface RespostaMotor {
   status: 'sucesso' | 'erro' | 'parcial'
   erro?: { codigo: string; mensagem: string } | null
   resumo: ResumoMotor
+  resultado_roteirizacao?: Record<string, unknown>[]
+  itens_manifestos?: Record<string, unknown>[]
+  manifestos_fechados?: Record<string, unknown>[]
+  manifestos_compostos?: Record<string, unknown>[]
+  logs_pipeline?: Record<string, unknown>[]
   resumo_execucao?: Record<string, unknown>
   resumo_negocio?: Record<string, unknown>
   encadeamento: EtapaPipeline[]
