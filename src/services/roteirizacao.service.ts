@@ -13,6 +13,11 @@ import {
   ManifestoRoteirizacaoDetalhe, ManifestoItemRoteirizacao, RemanescenteRoteirizacao, EstatisticasRoteirizacao
 } from '@/types'
 import { normalizeHorarioJanela } from '@/lib/time-normalizers'
+import {
+  normalizeAgendam,
+  normalizeDataDesDataNF,
+  normalizeDle,
+} from '@/lib/date-normalizers'
 
 const CAMPOS_MULTISELECT: Array<keyof Pick<FiltrosCarteira, 'filial_r' | 'uf' | 'destin' | 'cidade' | 'tomad' | 'mesoregiao' | 'prioridade' | 'restricao_veiculo'>> = [
   'filial_r',
@@ -110,6 +115,10 @@ const mapVeiculoToMotor = (veiculo: Record<string, unknown>) => ({
 const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): CarteiraCargaContratoMotor => {
   const inicioEntregaNormalizado = normalizeHorarioJanela(item.inicio_entrega)
   const fimEnNormalizado = normalizeHorarioJanela(item.fim_entrega)
+  const dataDesNormalizada = normalizeDataDesDataNF(item.data_des)
+  const dataNFNormalizada = normalizeDataDesDataNF(item.data_nf)
+  const dleNormalizada = normalizeDle(item.dle)
+  const agendamNormalizada = normalizeAgendam(item.agendam)
   const peso = toPayloadNumber(item.peso)
   const pesoCalculo = toPayloadNumber(item.peso_calculo)
   const valorMercadoria = toPayloadNumber(item.vlr_merc)
@@ -128,6 +137,19 @@ const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): Car
     if (item.fim_entrega !== null && item.fim_entrega !== undefined && fimEnNormalizado === null) {
       console.log('[PAYLOAD] Fim En inválido convertido para null no índice:', index, 'item_id:', item._carteira_item_id)
     }
+    if (index === 0) {
+      console.log('[PAYLOAD DATAS] exemplo item carteira:', {
+        nroDocumento: item.nro_doc,
+        dataDesOriginal: item.data_des,
+        dataDesNormalizada,
+        dataNFOriginal: item.data_nf,
+        dataNFNormalizada,
+        dleOriginal: item.dle,
+        dleNormalizada,
+        agendamOriginal: item.agendam,
+        agendamNormalizada,
+      })
+    }
   }
 
   return ({
@@ -136,10 +158,10 @@ const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): Car
   'Filial D': item.filial_d,
   'Série': item.serie,
   'Nro Doc.': item.nro_doc,
-  'Data Des': item.data_des,
-  'Data NF': item.data_nf,
-  'D.L.E.': item.dle,
-  'Agendam.': item.agendam,
+  'Data Des': dataDesNormalizada,
+  'Data NF': dataNFNormalizada,
+  'D.L.E.': dleNormalizada,
+  'Agendam.': agendamNormalizada,
   Palet: item.palet,
   Conf: item.conf,
   Peso: peso,
