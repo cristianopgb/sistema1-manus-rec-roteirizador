@@ -254,15 +254,27 @@ export interface CarteiraCargaContratoMotor {
 // --- Resposta do Motor (Sistema 2) ---
 export interface RespostaMotor {
   status: 'sucesso' | 'erro' | 'parcial'
+  mensagem?: string
+  pipeline_real_ate?: string
+  modo_resposta?: string
+  resposta_truncada?: boolean
   erro?: { codigo: string; mensagem: string } | null
   resumo: ResumoMotor
   resultado_roteirizacao?: Record<string, unknown>[]
   itens_manifestos?: Record<string, unknown>[]
   manifestos_fechados?: Record<string, unknown>[]
   manifestos_compostos?: Record<string, unknown>[]
+  manifestos_sequenciamento_resumo_m7?: Record<string, unknown>[]
+  tentativas_sequenciamento_m7?: Record<string, unknown>[]
+  diagnostico_recuperacao_coordenadas_m7?: Record<string, unknown>
+  remanescentes?: Record<string, unknown>
+  auditoria_serializacao?: Record<string, unknown>
+  auditoria_m7?: Record<string, unknown>
+  logs?: Record<string, unknown>[]
   logs_pipeline?: Record<string, unknown>[]
   resumo_execucao?: Record<string, unknown>
   resumo_negocio?: Record<string, unknown>
+  contexto_rodada?: Record<string, unknown>
   encadeamento: EtapaPipeline[]
   manifestos: ManifestoMotor[]
   manifestos_m7?: ManifestoMotorEstruturado[]
@@ -484,6 +496,8 @@ export interface RemanescenteRoteirizacao {
   uf: string | null
   motivo: string | null
   etapa_origem: string | null
+  grupo_remanescente?: string | null
+  payload_apoio_json?: Record<string, unknown> | null
   created_at: string
 }
 
