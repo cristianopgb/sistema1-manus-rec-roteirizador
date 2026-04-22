@@ -79,14 +79,24 @@ export function HistoricoPage() {
     }
   }
 
+  useEffect(() => {
+    if (tabAtiva !== 'manifestos') {
+      setManifestoAtivo(null)
+      setItensManifesto([])
+      setItensOriginais([])
+    }
+  }, [tabAtiva])
+
   const abrirManifesto = async (manifesto: ManifestoRoteirizacaoDetalhe) => {
     if (!rodadaSelecionada) return
+    console.log('[UI] manifesto selecionado:', manifesto.manifesto_id)
     setManifestoAtivo(manifesto)
     setManifestoLoading(true)
     try {
       const data = await roteirizacaoService.buscarManifestoOperacional(rodadaSelecionada.id, manifesto.manifesto_id)
       setItensManifesto(data.itens)
       setItensOriginais(data.itens)
+      console.log('[UI] itens do manifesto selecionado:', data.itens.length)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erro ao carregar entregas do manifesto')
     } finally {
@@ -112,7 +122,7 @@ export function HistoricoPage() {
   }
 
   const salvarSequencia = async () => {
-    if (!rodadaSelecionada || !manifestoAtivo) return
+    if (!rodadaSelecionada || !manifestoAtivo || itensManifesto.length === 0) return
     try {
       await roteirizacaoService.salvarOrdemManifestoItens(rodadaSelecionada.id, manifestoAtivo.manifesto_id, itensManifesto)
       setItensOriginais(itensManifesto)
@@ -240,6 +250,54 @@ export function HistoricoPage() {
                   </div>
                 </button>
               ))}
+
+              {manifestoAtivo && rodadaSelecionada && (
+                <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold">Manifesto {manifestoAtivo.manifesto_id}</h3>
+                    <button className="px-3 py-1.5 text-sm rounded-lg bg-gray-100" onClick={() => setManifestoAtivo(null)}>Fechar</button>
+                  </div>
+
+                  <div className="grid md:grid-cols-4 gap-3 text-sm">
+                    <div><span className="text-gray-500 block">Filial</span><strong>{rodadaSelecionada.filial_nome || '—'}</strong></div>
+                    <div><span className="text-gray-500 block">Data</span><strong>{rodadaSelecionada.created_at ? format(new Date(rodadaSelecionada.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '—'}</strong></div>
+                    <div><span className="text-gray-500 block">Veículo / Perfil</span><strong>{manifestoAtivo.veiculo_perfil || manifestoAtivo.veiculo_tipo || '—'}</strong></div>
+                    <div><span className="text-gray-500 block">Qtd. eixos</span><strong>{manifestoAtivo.qtd_eixos ?? '—'}</strong></div>
+                    <div><span className="text-gray-500 block">KM total</span><strong>{manifestoAtivo.km_total.toLocaleString('pt-BR')}</strong></div>
+                    <div><span className="text-gray-500 block">Peso total</span><strong>{manifestoAtivo.peso_total.toLocaleString('pt-BR')}</strong></div>
+                    <div><span className="text-gray-500 block">Qtd. entregas</span><strong>{manifestoAtivo.qtd_entregas}</strong></div>
+                    <div><span className="text-gray-500 block">Frete mínimo</span><strong>R$ {manifestoAtivo.frete_minimo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></div>
+                  </div>
+
+                  {manifestoLoading ? <div className="text-sm text-gray-500">Carregando entregas...</div> : (
+                    <>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="border-b"><tr><th className="text-left py-2">Sequência</th><th className="text-left">Documento</th><th className="text-left">Destinatário</th><th className="text-left">Cidade</th><th className="text-left">UF</th><th className="text-left">Peso</th><th className="text-left">Janela</th><th className="text-left">Ações</th></tr></thead>
+                          <tbody>
+                            {itensManifesto.map((item, index) => (
+                              <tr key={item.id} className="border-b">
+                                <td className="py-2">{item.sequencia}</td>
+                                <td>{item.nro_documento || '—'}</td>
+                                <td>{item.destinatario || '—'}</td>
+                                <td>{item.cidade || '—'}</td>
+                                <td>{item.uf || '—'}</td>
+                                <td>{item.peso?.toLocaleString('pt-BR') || '—'}</td>
+                                <td>{item.inicio_entrega || '—'} - {item.fim_entrega || '—'}</td>
+                                <td className="space-x-2"><button onClick={() => alterarSequencia(index, -1)} className="px-2 py-1 bg-gray-100 rounded">↑</button><button onClick={() => alterarSequencia(index, 1)} className="px-2 py-1 bg-gray-100 rounded">↓</button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="flex gap-2">
+                        <button disabled={itensManifesto.length === 0} onClick={() => void salvarSequencia()} className="px-4 py-2 text-sm rounded-lg bg-brand-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">Salvar ordem</button>
+                        <button disabled={itensManifesto.length === 0} onClick={desfazerSequencia} className="px-4 py-2 text-sm rounded-lg bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">Desfazer</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -272,53 +330,6 @@ export function HistoricoPage() {
         </div>
       )}
 
-      {manifestoAtivo && rodadaSelecionada && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Manifesto {manifestoAtivo.manifesto_id}</h3>
-            <button className="px-3 py-1.5 text-sm rounded-lg bg-gray-100" onClick={() => setManifestoAtivo(null)}>Fechar</button>
-          </div>
-
-          <div className="grid md:grid-cols-4 gap-3 text-sm">
-            <div><span className="text-gray-500 block">Filial</span><strong>{rodadaSelecionada.filial_nome || '—'}</strong></div>
-            <div><span className="text-gray-500 block">Data</span><strong>{rodadaSelecionada.created_at ? format(new Date(rodadaSelecionada.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '—'}</strong></div>
-            <div><span className="text-gray-500 block">Veículo / Perfil</span><strong>{manifestoAtivo.veiculo_perfil || manifestoAtivo.veiculo_tipo || '—'}</strong></div>
-            <div><span className="text-gray-500 block">Qtd. eixos</span><strong>{manifestoAtivo.qtd_eixos ?? '—'}</strong></div>
-            <div><span className="text-gray-500 block">KM total</span><strong>{manifestoAtivo.km_total.toLocaleString('pt-BR')}</strong></div>
-            <div><span className="text-gray-500 block">Peso total</span><strong>{manifestoAtivo.peso_total.toLocaleString('pt-BR')}</strong></div>
-            <div><span className="text-gray-500 block">Qtd. entregas</span><strong>{manifestoAtivo.qtd_entregas}</strong></div>
-            <div><span className="text-gray-500 block">Frete mínimo</span><strong>R$ {manifestoAtivo.frete_minimo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></div>
-          </div>
-
-          {manifestoLoading ? <div className="text-sm text-gray-500">Carregando entregas...</div> : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="border-b"><tr><th className="text-left py-2">Sequência</th><th className="text-left">Documento</th><th className="text-left">Destinatário</th><th className="text-left">Cidade</th><th className="text-left">UF</th><th className="text-left">Peso</th><th className="text-left">Janela</th><th className="text-left">Ações</th></tr></thead>
-                  <tbody>
-                    {itensManifesto.map((item, index) => (
-                      <tr key={item.id} className="border-b">
-                        <td className="py-2">{item.sequencia}</td>
-                        <td>{item.nro_documento || '—'}</td>
-                        <td>{item.destinatario || '—'}</td>
-                        <td>{item.cidade || '—'}</td>
-                        <td>{item.uf || '—'}</td>
-                        <td>{item.peso?.toLocaleString('pt-BR') || '—'}</td>
-                        <td>{item.inicio_entrega || '—'} - {item.fim_entrega || '—'}</td>
-                        <td className="space-x-2"><button onClick={() => alterarSequencia(index, -1)} className="px-2 py-1 bg-gray-100 rounded">↑</button><button onClick={() => alterarSequencia(index, 1)} className="px-2 py-1 bg-gray-100 rounded">↓</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => void salvarSequencia()} className="px-4 py-2 text-sm rounded-lg bg-brand-600 text-white">Salvar ordem</button>
-                <button onClick={desfazerSequencia} className="px-4 py-2 text-sm rounded-lg bg-gray-100">Desfazer</button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
     </div>
   )
 }
