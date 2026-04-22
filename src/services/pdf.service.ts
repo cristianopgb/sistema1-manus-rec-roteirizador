@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { ManifestoComFrete } from '@/types'
+import { ManifestoComFrete, ManifestoItemRoteirizacao, ManifestoRoteirizacaoDetalhe } from '@/types'
 
 export async function gerarPdfManifesto(manifesto: ManifestoComFrete): Promise<void> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
@@ -209,4 +209,88 @@ export async function gerarPdfManifesto(manifesto: ManifestoComFrete): Promise<v
 
   // ─── DOWNLOAD ────────────────────────────────────────────────────────────
   doc.save(`manifesto_${manifesto.numero_manifesto}_${new Date().toISOString().slice(0, 10)}.pdf`)
+}
+
+export async function gerarPdfManifestoOperacional(
+  manifesto: ManifestoRoteirizacaoDetalhe,
+  itens: ManifestoItemRoteirizacao[],
+  contexto: { filialNome?: string | null; dataRodada?: string | null } = {},
+): Promise<void> {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  const pageW = doc.internal.pageSize.getWidth()
+  const margin = 14
+  const dataEmissao = new Date()
+
+  doc.setFillColor(30, 64, 175)
+  doc.rect(0, 0, pageW, 28, 'F')
+  doc.setTextColor(255, 255, 255)
+  doc.setFontSize(14)
+  doc.setFont('helvetica', 'bold')
+  doc.text('MANIFESTO OPERACIONAL', margin, 11)
+  doc.setFontSize(9)
+  doc.setFont('helvetica', 'normal')
+  doc.text(`Manifesto: ${manifesto.manifesto_id}`, margin, 18)
+  doc.text(`Emissão: ${dataEmissao.toLocaleString('pt-BR')}`, margin, 23)
+
+  doc.setTextColor(0, 0, 0)
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'bold')
+  doc.text('RESUMO DO MANIFESTO', margin, 36)
+
+  autoTable(doc, {
+    startY: 39,
+    theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 2 },
+    body: [
+      ['Filial', contexto.filialNome || '—', 'Data da rodada', contexto.dataRodada || '—'],
+      ['Veículo / Perfil', manifesto.veiculo_perfil || manifesto.veiculo_tipo || '—', 'Qtd. eixos', String(manifesto.qtd_eixos ?? '—')],
+      ['Peso total', `${manifesto.peso_total.toLocaleString('pt-BR')} kg`, 'KM total', `${manifesto.km_total.toLocaleString('pt-BR')} km`],
+      ['Ocupação', `${manifesto.ocupacao.toFixed(1)}%`, 'Frete mínimo', `R$ ${manifesto.frete_minimo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
+      ['Qtd. entregas', String(manifesto.qtd_entregas), 'Qtd. clientes', String(manifesto.qtd_clientes)],
+    ],
+    columnStyles: {
+      0: { fontStyle: 'bold', fillColor: [241, 245, 249], cellWidth: 35 },
+      1: { cellWidth: 55 },
+      2: { fontStyle: 'bold', fillColor: [241, 245, 249], cellWidth: 35 },
+      3: { cellWidth: 45 },
+    },
+    margin: { left: margin, right: margin },
+  })
+
+  const yAposResumo = (doc as any).lastAutoTable.finalY + 6
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'bold')
+  doc.text(`ITENS (${itens.length})`, margin, yAposResumo)
+
+  autoTable(doc, {
+    startY: yAposResumo + 3,
+    theme: 'striped',
+    headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], fontSize: 8 },
+    styles: { fontSize: 7.5, cellPadding: 2 },
+    head: [['Seq', 'Documento', 'Destinatário', 'Cidade/UF', 'Peso', 'Janela']],
+    body: itens.map((item) => [
+      item.sequencia,
+      item.nro_documento || '—',
+      item.destinatario || '—',
+      `${item.cidade || '—'}/${item.uf || '—'}`,
+      item.peso != null ? item.peso.toLocaleString('pt-BR') : '—',
+      `${item.inicio_entrega || '—'} - ${item.fim_entrega || '—'}`,
+    ]),
+    margin: { left: margin, right: margin },
+  })
+
+  const pageCount = doc.getNumberOfPages()
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i)
+    doc.setFontSize(7)
+    doc.setTextColor(150)
+    doc.text(
+      `Manifesto ${manifesto.manifesto_id} · Pág. ${i}/${pageCount}`,
+      pageW / 2,
+      doc.internal.pageSize.getHeight() - 6,
+      { align: 'center' },
+    )
+  }
+
+  doc.save(`manifesto_${manifesto.manifesto_id}_${new Date().toISOString().slice(0, 10)}.pdf`)
 }

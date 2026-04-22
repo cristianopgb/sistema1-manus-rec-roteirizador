@@ -380,6 +380,15 @@ const extrairResumoRodada = (resposta: RespostaMotor, manifestosTotal: number, i
   }
 }
 
+const mapearStatusMotorParaStatusRodada = (
+  statusMotor: unknown,
+  houveErroPosProcessamento: boolean,
+): RodadaRoteirizacao['status'] => {
+  if (statusMotor === 'erro') return 'erro'
+  if (statusMotor === 'ok') return 'sucesso'
+  return houveErroPosProcessamento ? 'erro' : 'sucesso'
+}
+
 export const roteirizacaoService = {
   async persistirEstruturaRodada(
     rodadaId: string,
@@ -511,6 +520,8 @@ export const roteirizacaoService = {
       const resumoM7 = resumoManifestoPorId.get(registro.manifesto_id)
       const pesoTotal = agregado ? agregado.peso_total : toNumber(registro.peso_total, 0)
       const kmResumo = pickFirstNumber(
+        resumoM7?.km_total_sequencia_paradas_m7,
+        resumoM7?.km_total_sequencia_cidades_m7,
         resumoM7?.km_total,
         resumoM7?.km_total_manifesto,
         resumoM7?.distancia_total_km,
@@ -523,6 +534,18 @@ export const roteirizacaoService = {
         : toNumber(registro.ocupacao, 0)
       const qtdEixos = registro.qtd_eixos ?? (registro.veiculo_id ? eixosVeiculoMap.get(registro.veiculo_id) ?? null : null)
       const coef = anttCargaGeral.find((item) => item.num_eixos === qtdEixos)
+      const valorFreteMinimo = anttService.calcularFreteMinimo(kmTotal, coef?.coef_ccd ?? 0)
+      console.log('[KM M7] manifesto:', registro.manifesto_id, {
+        km_total_sequencia_paradas_m7: resumoM7?.km_total_sequencia_paradas_m7,
+        km_total_sequencia_cidades_m7: resumoM7?.km_total_sequencia_cidades_m7,
+        km_final_persistido: kmTotal,
+      })
+      console.log('[FRETE] manifesto:', registro.manifesto_id, {
+        km_total: kmTotal,
+        qtd_eixos: qtdEixos,
+        coef_ccd: coef?.coef_ccd ?? 0,
+        frete_minimo: valorFreteMinimo,
+      })
       return {
         ...registro,
         qtd_entregas: agregado?.qtd_entregas ?? toNumber(registro.qtd_entregas, 0),
@@ -531,7 +554,7 @@ export const roteirizacaoService = {
         km_total: kmTotal,
         ocupacao,
         qtd_eixos: qtdEixos,
-        frete_minimo: anttService.calcularFreteMinimo(kmTotal, coef?.coef_ccd ?? 0),
+        frete_minimo: valorFreteMinimo,
       }
     })
     const naoRoteirizaveisM3 = toRecordArray(remanescentes.nao_roteirizaveis_m3)
@@ -870,12 +893,15 @@ export const roteirizacaoService = {
       )
 
       await this.persistirEstruturaRodada(rodadaId, resposta, veiculos)
-      statusFinal = resposta.status as RodadaRoteirizacao['status']
+      statusFinal = mapearStatusMotorParaStatusRodada(resposta.status, false)
     } catch (erro) {
       console.error('[ROTEIRIZACAO] erro no fluxo pós-retorno', erro)
       erroPosRetorno = erro instanceof Error ? erro.message : 'Erro desconhecido no pós-retorno da roteirização'
       statusFinal = 'erro'
     } finally {
+      console.log('[ROTEIRIZACAO] status motor recebido:', resposta.status)
+      statusFinal = mapearStatusMotorParaStatusRodada(resposta.status, Boolean(erroPosRetorno))
+      console.log('[ROTEIRIZACAO] status mapeado para rodada:', statusFinal)
       const tempoMs = Date.now() - inicio
       const rodadaPayload = {
         status: statusFinal,
