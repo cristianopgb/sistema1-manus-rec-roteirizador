@@ -54,9 +54,9 @@ export const anttService = {
 
   /**
    * Calcula o frete mínimo ANTT para um manifesto
-   * Fórmula operacional: distância total * deslocamento (R$/km)
+   * Fórmula operacional: (distância total * deslocamento R$/km) + carga/descarga (R$)
    */
-  calcularFreteMinimo(kmEstimado: number, coeficienteDeslocamento: number): number {
-    return kmEstimado * coeficienteDeslocamento
+  calcularFreteMinimo(kmEstimado: number, coeficienteDeslocamento: number, cargaDescarga = 0): number {
+    return (kmEstimado * coeficienteDeslocamento) + cargaDescarga
   },
 }

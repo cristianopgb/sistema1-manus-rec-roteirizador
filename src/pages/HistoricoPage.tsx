@@ -178,6 +178,69 @@ export function HistoricoPage() {
     return map[status] || 'bg-gray-100 text-gray-700'
   }
 
+  const indicadoresTriagem = useMemo(() => {
+    if (!rodadaSelecionada) return null
+    const resposta = (rodadaSelecionada.resposta_motor ?? {}) as Record<string, unknown>
+    const resumoExecucao = (resposta.resumo_execucao ?? {}) as Record<string, unknown>
+    const resumoNegocio = (resposta.resumo_negocio ?? {}) as Record<string, unknown>
+    const toNum = (value: unknown, fallback = 0) => {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? parsed : fallback
+    }
+    const totalCarteira = Math.trunc(toNum(
+      rodadaSelecionada.total_cargas_entrada,
+      toNum((resposta as Record<string, unknown>).total_carteira, toNum(resumoNegocio.total_carteira, toNum(resumoExecucao.total_carteira, 0))),
+    ))
+    const carteiraRoteirizavel = Math.trunc(toNum(
+      resumoNegocio.carteira_roteirizavel,
+      toNum(resumoExecucao.carteira_roteirizavel, totalCarteira),
+    ))
+    const agendasVencidas = Math.trunc(toNum(
+      resumoNegocio.carteira_agendas_vencidas,
+      toNum(resumoExecucao.carteira_agendas_vencidas, Array.isArray(resposta.cargas_agenda_vencida) ? resposta.cargas_agenda_vencida.length : 0),
+    ))
+    const agendamentoFuturo = Math.trunc(toNum(
+      resumoNegocio.carteira_agendamento_futuro,
+      toNum(resumoExecucao.carteira_agendamento_futuro, Array.isArray(resposta.cargas_agendamento_futuro) ? resposta.cargas_agendamento_futuro.length : 0),
+    ))
+    const excecoesTriagem = Math.trunc(toNum(
+      resumoNegocio.carteira_excecoes_triagem,
+      toNum(resumoExecucao.carteira_excecoes_triagem, Array.isArray(resposta.cargas_excecao_triagem) ? resposta.cargas_excecao_triagem.length : 0),
+    ))
+    const itensRoteirizados = estatisticas?.total_roteirizado ?? manifestos.reduce((acc, manifesto) => acc + (manifesto.qtd_entregas || 0), 0)
+    const totalManifestos = estatisticas?.total_manifestos ?? manifestos.length
+    const kmTotal = estatisticas?.km_total ?? manifestos.reduce((acc, manifesto) => acc + (manifesto.km_total || 0), 0)
+    const ocupacaoMedia = estatisticas?.ocupacao_media ?? (manifestos.length ? manifestos.reduce((acc, manifesto) => acc + (manifesto.ocupacao || 0), 0) / manifestos.length : 0)
+    const tempoExecucao = estatisticas?.tempo_execucao_ms ?? rodadaSelecionada.tempo_processamento_ms ?? 0
+    const itensNaoRoteirizados = Math.max(0, carteiraRoteirizavel - itensRoteirizados)
+    const naoAtendidosUniversoTotal = Math.max(0, totalCarteira - itensRoteirizados)
+    const taxaAproveitamento = totalCarteira > 0 ? (itensRoteirizados / totalCarteira) * 100 : 0
+
+    const indicadores = {
+      totalCarteira,
+      carteiraRoteirizavel,
+      itensRoteirizados,
+      itensNaoRoteirizados,
+      totalManifestos,
+      itensPorManifesto: totalManifestos > 0 ? itensRoteirizados / totalManifestos : 0,
+      ocupacaoMedia,
+      kmTotal,
+      kmMedioManifesto: totalManifestos > 0 ? kmTotal / totalManifestos : 0,
+      tempoExecucao,
+      agendasVencidas,
+      agendamentoFuturo,
+      excecoesTriagem,
+      taxaAproveitamento,
+      naoAtendidosUniversoTotal,
+    }
+    console.log('[ESTATISTICAS] indicadores calculados:', indicadores)
+    return indicadores
+  }, [estatisticas, manifestos, rodadaSelecionada])
+
+  const itensAgendados = useMemo(() => (
+    itensManifesto.filter((item) => Boolean(item.inicio_entrega || item.fim_entrega || (item as unknown as Record<string, unknown>).data_agenda))
+  ), [itensManifesto])
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -295,14 +358,40 @@ export function HistoricoPage() {
           )}
 
           {!detalhesLoading && tabAtiva === 'estatisticas' && (
-            <div className="grid md:grid-cols-4 gap-3 text-sm">
-              <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total carteira</div><strong>{estatisticas?.total_carteira ?? 0}</strong></div>
-              <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total roteirizado</div><strong>{estatisticas?.total_roteirizado ?? 0}</strong></div>
-              <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total remanescente</div><strong>{estatisticas?.total_remanescente ?? 0}</strong></div>
-              <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total manifestos</div><strong>{estatisticas?.total_manifestos ?? 0}</strong></div>
-              <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Ocupação média</div><strong>{(estatisticas?.ocupacao_media ?? 0).toFixed(1)}%</strong></div>
-              <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">KM total</div><strong>{(estatisticas?.km_total ?? 0).toLocaleString('pt-BR')} km</strong></div>
-              <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Tempo de execução</div><strong>{(estatisticas?.tempo_execucao_ms ?? 0).toLocaleString('pt-BR')} ms</strong></div>
+            <div className="space-y-4">
+              <div className="grid md:grid-cols-4 gap-3 text-sm">
+                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total carteira</div><strong>{estatisticas?.total_carteira ?? 0}</strong></div>
+                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total roteirizado</div><strong>{estatisticas?.total_roteirizado ?? 0}</strong></div>
+                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total remanescente final</div><strong>{estatisticas?.total_remanescente ?? 0}</strong></div>
+                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total manifestos</div><strong>{estatisticas?.total_manifestos ?? 0}</strong></div>
+              </div>
+              <div className="grid md:grid-cols-3 gap-3 text-sm">
+                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Ocupação média</div><strong>{(estatisticas?.ocupacao_media ?? 0).toFixed(1)}%</strong></div>
+                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">KM total</div><strong>{(estatisticas?.km_total ?? 0).toLocaleString('pt-BR')} km</strong></div>
+                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Tempo de execução</div><strong>{(estatisticas?.tempo_execucao_ms ?? 0).toLocaleString('pt-BR')} ms</strong></div>
+              </div>
+              {indicadoresTriagem && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold text-gray-700">Indicadores de triagem e aproveitamento</h4>
+                  <div className="grid md:grid-cols-4 gap-3 text-sm">
+                    <div className="p-3 rounded-lg bg-blue-50"><div className="text-gray-600">Total de Cargas</div><strong>{indicadoresTriagem.totalCarteira}</strong></div>
+                    <div className="p-3 rounded-lg bg-blue-50"><div className="text-gray-600">Cargas Roteirizáveis</div><strong>{indicadoresTriagem.carteiraRoteirizavel}</strong></div>
+                    <div className="p-3 rounded-lg bg-green-50"><div className="text-gray-600">Itens Roteirizados</div><strong>{indicadoresTriagem.itensRoteirizados}</strong></div>
+                    <div className="p-3 rounded-lg bg-amber-50"><div className="text-gray-600">Itens Não Roteirizados</div><strong>{indicadoresTriagem.itensNaoRoteirizados}</strong></div>
+                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">Não Atendidos (Universo Total)</div><strong>{indicadoresTriagem.naoAtendidosUniversoTotal}</strong></div>
+                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">Manifestos Gerados</div><strong>{indicadoresTriagem.totalManifestos}</strong></div>
+                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">Itens por Manifesto</div><strong>{indicadoresTriagem.itensPorManifesto.toFixed(2)}</strong></div>
+                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">Ocupação Média (%)</div><strong>{indicadoresTriagem.ocupacaoMedia.toFixed(1)}%</strong></div>
+                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">KM Total</div><strong>{indicadoresTriagem.kmTotal.toLocaleString('pt-BR')} km</strong></div>
+                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">KM Médio por Manifesto</div><strong>{indicadoresTriagem.kmMedioManifesto.toFixed(2)} km</strong></div>
+                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">Tempo de Execução (ms)</div><strong>{Math.trunc(indicadoresTriagem.tempoExecucao).toLocaleString('pt-BR')}</strong></div>
+                    <div className="p-3 rounded-lg bg-rose-50"><div className="text-gray-600">Cargas com Agenda Vencida</div><strong>{indicadoresTriagem.agendasVencidas}</strong></div>
+                    <div className="p-3 rounded-lg bg-indigo-50"><div className="text-gray-600">Cargas com Agendamento Futuro</div><strong>{indicadoresTriagem.agendamentoFuturo}</strong></div>
+                    <div className="p-3 rounded-lg bg-red-50"><div className="text-gray-600">Exceções de Triagem</div><strong>{indicadoresTriagem.excecoesTriagem}</strong></div>
+                    <div className="p-3 rounded-lg bg-emerald-50"><div className="text-gray-600">Taxa de Aproveitamento (%)</div><strong>{indicadoresTriagem.taxaAproveitamento.toFixed(1)}%</strong></div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -349,6 +438,70 @@ export function HistoricoPage() {
                     </tbody>
                   </table>
                 </div>
+                <div className="border border-gray-200 rounded-lg p-3 space-y-3">
+                  <h4 className="text-sm font-semibold text-gray-800">Romaneio / Resumo operacional</h4>
+                  <div className="grid md:grid-cols-3 gap-2 text-xs">
+                    {[
+                      ['Linha / rota', manifestoAtivo.tipo_manifesto || manifestoAtivo.manifesto_id || '—'],
+                      ['Remetente', '—'],
+                      ['N. Fiscal(s)/Data', '—'],
+                      ['Destinatário', itensManifesto[0]?.destinatario || '—'],
+                      ['Cidade', itensManifesto[0] ? `${itensManifesto[0].cidade || '—'} / ${itensManifesto[0].uf || '—'}` : '—'],
+                      ['Doc CTRC / documento', itensManifesto[0]?.nro_documento || '—'],
+                      ['Peso bruto', manifestoAtivo.peso_total?.toLocaleString('pt-BR') || '—'],
+                      ['Peso KG', manifestoAtivo.peso_total?.toLocaleString('pt-BR') || '—'],
+                      ['Valor da mercadoria', '—'],
+                      ['Tipo de carga', manifestoAtivo.tipo_manifesto || '—'],
+                      ['Data chegada', '—'],
+                      ['Data descarga', '—'],
+                      ['Senha do SAR', '—'],
+                      ['Atendente', rodadaSelecionada.usuario_nome || '—'],
+                    ].map(([label, value]) => (
+                      <div key={label} className="bg-gray-50 rounded p-2 border border-gray-100">
+                        <div className="text-gray-500">{label}</div>
+                        <div className="font-semibold text-gray-800">{value || '—'}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {itensAgendados.length > 0 ? (
+                  <div className="border border-amber-300 bg-amber-50 rounded-lg p-3 space-y-2">
+                    <h4 className="text-sm font-semibold text-amber-900">Cargas agendadas em destaque ({itensAgendados.length})</h4>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-amber-300 text-left">
+                            <th className="py-1">CTE / Documento</th>
+                            <th>Destinatário</th>
+                            <th>Cidade</th>
+                            <th>UF</th>
+                            <th>Data</th>
+                            <th>Hora</th>
+                            <th>Info agendamento</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {itensAgendados.map((item) => {
+                            const extra = item as unknown as Record<string, unknown>
+                            return (
+                              <tr key={`ag-${item.id}`} className="border-b border-amber-200">
+                                <td className="py-1">{item.nro_documento || '—'}</td>
+                                <td>{item.destinatario || '—'}</td>
+                                <td>{item.cidade || '—'}</td>
+                                <td>{item.uf || '—'}</td>
+                                <td>{String(extra.data_agenda ?? '—')}</td>
+                                <td>{`${item.inicio_entrega || '—'} - ${item.fim_entrega || '—'}`}</td>
+                                <td>{String(extra.janela ?? extra.info_agendamento ?? 'Agendada')}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">Sem cargas agendadas.</p>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <button disabled={itensManifesto.length === 0} onClick={() => void salvarSequencia()} className="px-4 py-2 text-sm rounded-lg bg-brand-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">Salvar ordem</button>
                   <button disabled={itensManifesto.length === 0} onClick={desfazerSequencia} className="px-4 py-2 text-sm rounded-lg bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">Desfazer</button>

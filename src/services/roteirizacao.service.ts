@@ -380,6 +380,42 @@ const extrairResumoRodada = (resposta: RespostaMotor, manifestosTotal: number, i
   }
 }
 
+const extrairTempoExecucaoMs = (
+  resposta: RespostaMotor,
+  rodadaAtual?: { tempo_processamento_ms?: number | null } | null,
+  fallback = 0,
+): number => {
+  const resumo = toRecord(resposta.resumo) ?? {}
+  const resumoExecucao = toRecord(resposta.resumo_execucao) ?? {}
+  const temposMs = toRecord(resumoExecucao.tempos_ms) ?? {}
+  const logsPipeline = toRecordArray(resposta.logs_pipeline)
+
+  const tempoPipeline = logsPipeline.reduce((acc, item) => {
+    const candidatos = [
+      toNumber(item.tempo_processamento_ms, 0),
+      toNumber(item.tempo_ms, 0),
+      toNumber(item.duracao_ms, 0),
+      toNumber(item.total_ms, 0),
+    ]
+    const maior = Math.max(...candidatos)
+    return maior > acc ? maior : acc
+  }, 0)
+
+  return Math.trunc(toNumber(
+    rodadaAtual?.tempo_processamento_ms,
+    toNumber(
+      resumo.tempo_processamento_ms,
+      toNumber(
+        temposMs.total,
+        toNumber(
+          resumoExecucao.tempo_execucao_ms,
+          toNumber(resumoExecucao.tempo_processamento_ms, tempoPipeline || fallback),
+        ),
+      ),
+    ),
+  ))
+}
+
 const mapearStatusMotorParaStatusRodada = (
   statusMotor: unknown,
   houveErroPosProcessamento: boolean,
@@ -400,16 +436,12 @@ export const roteirizacaoService = {
     const itensM7 = toRecordArray(resposta.itens_manifestos_sequenciados_m7)
     const resumoManifestosM7 = toRecordArray(resposta.manifestos_sequenciamento_resumo_m7)
     const remanescentes = toRecord(resposta.remanescentes) ?? {}
-    const resumoExecucao = toRecord(resposta.resumo_execucao) ?? {}
-    const resumoNegocio = toRecord(resposta.resumo_negocio) ?? {}
     const auditoriaSerializacao = toRecord(resposta.auditoria_serializacao) ?? {}
     const auditoriaM7 = toRecord(resposta.auditoria_m7) ?? {}
     const manifestosFechados = toRecordArray(resposta.manifestos_fechados)
     const manifestosCompostos = toRecordArray(resposta.manifestos_compostos)
     const manifestosFonte = manifestosM7.length ? manifestosM7 : extrairManifestosResposta(resposta)
     const itensFonte = itensM7.length ? itensM7 : extrairItensResposta(resposta, manifestosFonte)
-    void resumoExecucao
-    void resumoNegocio
     void auditoriaSerializacao
     void auditoriaM7
     console.log('[EXTRACTOR] manifestos_m7:', manifestosM7.length)
@@ -534,17 +566,24 @@ export const roteirizacaoService = {
         : toNumber(registro.ocupacao, 0)
       const qtdEixos = registro.qtd_eixos ?? (registro.veiculo_id ? eixosVeiculoMap.get(registro.veiculo_id) ?? null : null)
       const coef = anttCargaGeral.find((item) => item.num_eixos === qtdEixos)
-      const valorFreteMinimo = anttService.calcularFreteMinimo(kmTotal, coef?.coef_ccd ?? 0)
+      const cargaDescarga = pickFirstNumber(
+        (coef as unknown as Record<string, unknown>)?.valor_carga_descarga,
+        (coef as unknown as Record<string, unknown>)?.carga_descarga,
+        coef?.coef_cc,
+        0,
+      ) ?? 0
+      const valorFreteMinimo = anttService.calcularFreteMinimo(kmTotal, coef?.coef_ccd ?? 0, kmTotal > 0 ? cargaDescarga : 0)
       console.log('[KM M7] manifesto:', registro.manifesto_id, {
         km_total_sequencia_paradas_m7: resumoM7?.km_total_sequencia_paradas_m7,
         km_total_sequencia_cidades_m7: resumoM7?.km_total_sequencia_cidades_m7,
         km_final_persistido: kmTotal,
       })
-      console.log('[FRETE] manifesto:', registro.manifesto_id, {
+      console.log('[FRETE COMPLETO] manifesto:', registro.manifesto_id, {
         km_total: kmTotal,
         qtd_eixos: qtdEixos,
-        coef_ccd: coef?.coef_ccd ?? 0,
-        frete_minimo: valorFreteMinimo,
+        deslocamento_r_km: coef?.coef_ccd ?? 0,
+        carga_descarga_rs: cargaDescarga,
+        frete_minimo_final: valorFreteMinimo,
       })
       return {
         ...registro,
@@ -573,22 +612,7 @@ export const roteirizacaoService = {
     const totalRemanescentes = registrosRemanescentes.length
     console.log('[PERSISTENCIA] remanescentes totais:', totalRemanescentes)
 
-    const resumoRodada = extrairResumoRodada(
-      resposta,
-      manifestosComFrete.length,
-      registrosItens.length,
-      registrosRemanescentes.length,
-    )
-    const registroEstatistica = {
-      rodada_id: rodadaId,
-      total_carteira: resumoRodada.total_cargas_entrada,
-      total_roteirizado: resumoRodada.total_itens_manifestados,
-      total_remanescente: resumoRodada.total_nao_roteirizados,
-      total_manifestos: resumoRodada.total_manifestos,
-      km_total: resumoRodada.km_total_frota,
-      ocupacao_media: resumoRodada.ocupacao_media_percentual,
-      tempo_execucao_ms: resumoRodada.tempo_processamento_ms,
-    }
+    const resumoRodada = extrairResumoRodada(resposta, manifestosComFrete.length, registrosItens.length, registrosRemanescentes.length)
 
     await supabase.from('manifestos_roteirizacao').delete().eq('rodada_id', rodadaId)
     await supabase.from('manifestos_itens').delete().eq('rodada_id', rodadaId)
@@ -617,8 +641,88 @@ export const roteirizacaoService = {
     const totalRemanescentesSalvos = registrosRemanescentes.length
     console.log('[PERSISTENCIA] remanescentes salvos:', totalRemanescentesSalvos)
 
+    const { data: rodadaAtualData } = await supabase
+      .from('rodadas_roteirizacao')
+      .select('total_cargas_entrada, tempo_processamento_ms')
+      .eq('id', rodadaId)
+      .maybeSingle()
+    const rodadaAtual = (rodadaAtualData as { total_cargas_entrada?: number | null; tempo_processamento_ms?: number | null } | null) ?? null
+
+    const resumoExecucao = toRecord(resposta.resumo_execucao) ?? {}
+    const resumoNegocio = toRecord(resposta.resumo_negocio) ?? {}
+    const totalCarteira = Math.max(0, Math.trunc(toNumber(
+      rodadaAtual?.total_cargas_entrada,
+      toNumber(
+        (resposta as unknown as Record<string, unknown>).total_carteira,
+        toNumber(
+          resumoNegocio.total_carteira,
+          toNumber(resumoExecucao.total_carteira, resumoRodada.total_cargas_entrada),
+        ),
+      ),
+    )))
+    const totalManifestos = totalManifestosSalvos > 0 ? totalManifestosSalvos : Math.trunc(toNumber(resumoRodada.total_manifestos, manifestosM7.length))
+    const totalRoteirizado = totalItensSalvos > 0 ? totalItensSalvos : Math.trunc(toNumber(resumoRodada.total_itens_manifestados, itensM7.length))
+    const kmTotalRodada = manifestosComFrete.reduce((acc, manifesto) => acc + toNumber(manifesto.km_total, 0), 0)
+    const ocupacoes = manifestosComFrete
+      .map((manifesto) => manifesto.ocupacao)
+      .filter((valor) => Number.isFinite(valor))
+    const ocupacaoMediaRodada = ocupacoes.length
+      ? ocupacoes.reduce((acc, valor) => acc + valor, 0) / ocupacoes.length
+      : toNumber(resumoRodada.ocupacao_media_percentual, 0)
+
+    const carteiraRoteirizavel = Math.trunc(toNumber(
+      resumoNegocio.carteira_roteirizavel,
+      toNumber(resumoExecucao.carteira_roteirizavel, toNumber(resumoRodada.total_cargas_entrada, totalCarteira)),
+    ))
+    const agendasVencidas = Math.trunc(toNumber(
+      resumoNegocio.carteira_agendas_vencidas,
+      toNumber(resumoExecucao.carteira_agendas_vencidas, toRecordArray(resposta.cargas_agenda_vencida).length),
+    ))
+    const agendamentoFuturo = Math.trunc(toNumber(
+      resumoNegocio.carteira_agendamento_futuro,
+      toNumber(resumoExecucao.carteira_agendamento_futuro, toRecordArray(resposta.cargas_agendamento_futuro).length),
+    ))
+    const excecoesTriagem = Math.trunc(toNumber(
+      resumoNegocio.carteira_excecoes_triagem,
+      toNumber(resumoExecucao.carteira_excecoes_triagem, toRecordArray(resposta.cargas_excecao_triagem).length),
+    ))
+
+    const baseRemanescente = totalCarteira > 0 ? totalCarteira : carteiraRoteirizavel
+    const totalRemanescente = Math.max(0, baseRemanescente - totalRoteirizado - agendasVencidas - agendamentoFuturo - excecoesTriagem)
+    const tempoExecucaoMs = extrairTempoExecucaoMs(resposta, rodadaAtual, resumoRodada.tempo_processamento_ms)
+
+    const registroEstatistica = {
+      rodada_id: rodadaId,
+      total_carteira: totalCarteira,
+      total_roteirizado: totalRoteirizado,
+      total_remanescente: totalRemanescente,
+      total_manifestos: totalManifestos,
+      km_total: kmTotalRodada,
+      ocupacao_media: ocupacaoMediaRodada,
+      tempo_execucao_ms: tempoExecucaoMs,
+    }
+
+    console.log('[ESTATISTICAS] km_total_rodada:', kmTotalRodada)
+    console.log('[ESTATISTICAS] ocupacao_media_rodada:', ocupacaoMediaRodada)
+    console.log('[ESTATISTICAS] tempo_execucao_ms:', tempoExecucaoMs)
+
     const { error: estError } = await supabase.from('estatisticas_roteirizacao').upsert(registroEstatistica)
     if (estError) throw estError
+
+    const { error: rodadaAggError } = await supabase
+      .from('rodadas_roteirizacao')
+      .update({
+        total_cargas_entrada: totalCarteira,
+        total_manifestos: totalManifestos,
+        total_itens_manifestados: totalRoteirizado,
+        total_nao_roteirizados: totalRemanescente,
+        km_total_frota: kmTotalRodada,
+        ocupacao_media_percentual: ocupacaoMediaRodada,
+        tempo_processamento_ms: tempoExecucaoMs,
+      })
+      .eq('id', rodadaId)
+    if (rodadaAggError) throw rodadaAggError
+
     console.log('[PERSISTENCIA] estatisticas salvas para rodada:', rodadaId)
   },
 
@@ -866,7 +970,7 @@ export const roteirizacaoService = {
         throw new Error(resposta.erro?.mensagem || 'O motor retornou um erro desconhecido')
       }
 
-      // 3. Calcular frete mínimo ANTT para cada manifesto (somente deslocamento da categoria Carga geral)
+      // 3. Calcular frete mínimo ANTT para cada manifesto (deslocamento + carga/descarga da categoria Carga geral)
       const tabelaAntt = await anttService.listar()
       manifestosComFrete = await Promise.all(
         manifestosResposta.map(async (manifesto) => {
@@ -878,14 +982,20 @@ export const roteirizacaoService = {
           )
 
           const coefDeslocamento = coef?.coef_ccd || 0
-          const freteMinimo = anttService.calcularFreteMinimo(manifesto.km_estimado, coefDeslocamento)
+          const cargaDescarga = pickFirstNumber(
+            (coef as unknown as Record<string, unknown>)?.valor_carga_descarga,
+            (coef as unknown as Record<string, unknown>)?.carga_descarga,
+            coef?.coef_cc,
+            0,
+          ) ?? 0
+          const freteMinimo = anttService.calcularFreteMinimo(manifesto.km_estimado, coefDeslocamento, manifesto.km_estimado > 0 ? cargaDescarga : 0)
 
           return {
             ...manifesto,
             frete_minimo_antt: freteMinimo,
             tipo_carga_antt: String(tipoCargaId),
             coeficiente_deslocamento: coefDeslocamento,
-            coeficiente_carga_descarga: 0,
+            coeficiente_carga_descarga: cargaDescarga,
             aprovado: false,
             excluido: false,
           }

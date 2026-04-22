@@ -262,22 +262,103 @@ export async function gerarPdfManifestoOperacional(
   doc.setFont('helvetica', 'bold')
   doc.text(`ITENS (${itens.length})`, margin, yAposResumo)
 
+  const itensAgendados = itens.filter((item) => {
+    const extra = item as unknown as Record<string, unknown>
+    return Boolean(item.inicio_entrega || item.fim_entrega || extra.data_agenda || extra.janela)
+  })
+
   autoTable(doc, {
     startY: yAposResumo + 3,
     theme: 'striped',
     headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], fontSize: 8 },
     styles: { fontSize: 7.5, cellPadding: 2 },
-    head: [['Seq', 'Documento', 'Destinatário', 'Cidade/UF', 'Peso', 'Janela']],
+    head: [['Seq', 'Documento', 'Destino', 'Cidade/UF', 'Janela']],
     body: itens.map((item) => [
       item.sequencia,
       item.nro_documento || '—',
       item.destinatario || '—',
       `${item.cidade || '—'}/${item.uf || '—'}`,
-      item.peso != null ? item.peso.toLocaleString('pt-BR') : '—',
       `${item.inicio_entrega || '—'} - ${item.fim_entrega || '—'}`,
     ]),
     margin: { left: margin, right: margin },
+    columnStyles: {
+      0: { cellWidth: 12 },
+      1: { cellWidth: 34 },
+      2: { cellWidth: 58 },
+      3: { cellWidth: 30 },
+      4: { cellWidth: 38 },
+    },
   })
+
+  let cursorY = (doc as any).lastAutoTable.finalY + 6
+  if (cursorY > 250) {
+    doc.addPage()
+    cursorY = 20
+  }
+
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'bold')
+  doc.text('ROMANEIO / RESUMO OPERACIONAL', margin, cursorY)
+  autoTable(doc, {
+    startY: cursorY + 3,
+    theme: 'grid',
+    styles: { fontSize: 7.5, cellPadding: 1.6 },
+    body: [
+      ['Linha / rota', manifesto.tipo_manifesto || manifesto.manifesto_id || '—', 'Remetente', '—'],
+      ['N. Fiscal(s)/Data', '—', 'Destinatário', itens[0]?.destinatario || '—'],
+      ['Cidade', itens[0] ? `${itens[0].cidade || '—'} / ${itens[0].uf || '—'}` : '—', 'Doc CTRC / documento', itens[0]?.nro_documento || '—'],
+      ['Peso bruto', `${manifesto.peso_total.toLocaleString('pt-BR')} kg`, 'Peso KG', `${manifesto.peso_total.toLocaleString('pt-BR')} kg`],
+      ['Valor da mercadoria', '—', 'Tipo de carga', manifesto.tipo_manifesto || '—'],
+      ['Data chegada', '—', 'Data descarga', '—'],
+      ['Senha do SAR', '—', 'Atendente', '—'],
+    ],
+    columnStyles: {
+      0: { fontStyle: 'bold', fillColor: [241, 245, 249], cellWidth: 35 },
+      1: { cellWidth: 55 },
+      2: { fontStyle: 'bold', fillColor: [241, 245, 249], cellWidth: 35 },
+      3: { cellWidth: 45 },
+    },
+    margin: { left: margin, right: margin },
+  })
+
+  cursorY = (doc as any).lastAutoTable.finalY + 6
+  if (itensAgendados.length > 0) {
+    if (cursorY > 242) {
+      doc.addPage()
+      cursorY = 20
+    }
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'bold')
+    doc.text(`CARGAS AGENDADAS (${itensAgendados.length})`, margin, cursorY)
+    autoTable(doc, {
+      startY: cursorY + 3,
+      theme: 'striped',
+      headStyles: { fillColor: [180, 83, 9], textColor: [255, 255, 255], fontSize: 8 },
+      styles: { fontSize: 7, cellPadding: 1.5 },
+      head: [['CTE / Doc', 'Destinatário', 'Cidade', 'UF', 'Data', 'Hora', 'Info']],
+      body: itensAgendados.map((item) => {
+        const extra = item as unknown as Record<string, unknown>
+        return [
+          item.nro_documento || '—',
+          item.destinatario || '—',
+          item.cidade || '—',
+          item.uf || '—',
+          String(extra.data_agenda ?? '—'),
+          `${item.inicio_entrega || '—'} - ${item.fim_entrega || '—'}`,
+          String(extra.janela ?? extra.info_agendamento ?? 'Agendada'),
+        ]
+      }),
+      margin: { left: margin, right: margin },
+      columnStyles: {
+        0: { cellWidth: 22 },
+        1: { cellWidth: 44 },
+        2: { cellWidth: 26 },
+        3: { cellWidth: 10 },
+        4: { cellWidth: 20 },
+        5: { cellWidth: 24 },
+      },
+    })
+  }
 
   const pageCount = doc.getNumberOfPages()
   for (let i = 1; i <= pageCount; i++) {
@@ -293,4 +374,6 @@ export async function gerarPdfManifestoOperacional(
   }
 
   doc.save(`manifesto_${manifesto.manifesto_id}_${new Date().toISOString().slice(0, 10)}.pdf`)
+  console.log('[PDF] manifesto exportado:', manifesto.manifesto_id)
+  console.log('[PDF] cargas agendadas no manifesto:', itensAgendados.length)
 }
