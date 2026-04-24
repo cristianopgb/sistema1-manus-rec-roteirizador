@@ -473,6 +473,26 @@ export const carteiraUploadService = {
       .slice(0, limite)
   },
 
+  async excluirUpload(uploadId: string): Promise<void> {
+    const { error: rodadasError } = await supabase
+      .from('rodadas_roteirizacao')
+      .delete()
+      .eq('upload_id', uploadId)
+
+    if (rodadasError) {
+      throw new Error(`Falha ao remover rodadas vinculadas ao upload: ${rodadasError.message}`)
+    }
+
+    const { error: uploadError } = await supabase
+      .from('uploads_carteira')
+      .delete()
+      .eq('id', uploadId)
+
+    if (uploadError) {
+      throw new Error(`Falha ao remover upload: ${uploadError.message}`)
+    }
+  },
+
   expectedRawColumns: DATASET_COLUNAS_BRUTAS,
 }
 

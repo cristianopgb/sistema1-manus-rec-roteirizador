@@ -97,6 +97,7 @@ export function RoteirizacaoPage() {
 
   const [historicoUploads, setHistoricoUploads] = useState<UploadHistoricoItem[]>([])
   const [historicoLoading, setHistoricoLoading] = useState(false)
+  const [deletingUploadId, setDeletingUploadId] = useState<string | null>(null)
 
   const [filiaisMaster, setFiliaisMaster] = useState<Filial[]>([])
   const [filiaisMasterLoading, setFiliaisMasterLoading] = useState(false)
@@ -408,6 +409,27 @@ export function RoteirizacaoPage() {
     setManifestos([])
   }
 
+  const excluirUpload = useCallback(async (uploadItem: UploadHistoricoItem) => {
+    const confirmado = window.confirm('Tem certeza que deseja excluir este upload/rodada?')
+    if (!confirmado) return
+
+    try {
+      setDeletingUploadId(uploadItem.id)
+      await carteiraUploadService.excluirUpload(uploadItem.id)
+      toast.success('Upload excluído com sucesso.')
+
+      if (upload.uploadId === uploadItem.id) {
+        reiniciar()
+      }
+
+      await carregarHistorico()
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Não foi possível excluir o upload selecionado.'))
+    } finally {
+      setDeletingUploadId(null)
+    }
+  }, [carregarHistorico, reiniciar, upload.uploadId])
+
   const estadoAuthBloqueante = (profileLoading || filialLoading) && !profileError && !filialError && !filialOperacional
 
   if (estadoAuthBloqueante) {
@@ -445,7 +467,14 @@ export function RoteirizacaoPage() {
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => e.target.files?.[0] && handleArquivo(e.target.files[0])} />
         </div>
 
-        <UploadHistoryList uploads={historicoUploads} selectedUploadId={upload.uploadId} loading={historicoLoading} onSelect={(id) => void carregarUploadById(id)} />
+        <UploadHistoryList
+          uploads={historicoUploads}
+          selectedUploadId={upload.uploadId}
+          loading={historicoLoading}
+          deletingUploadId={deletingUploadId}
+          onSelect={(id) => void carregarUploadById(id)}
+          onDelete={(item) => void excluirUpload(item)}
+        />
 
         {upload.carregando && <div className="flex items-center justify-center gap-2 mt-6 text-brand-600"><Loader2 size={20} className="animate-spin" /><span>Processando arquivo...</span></div>}
         {upload.erro && <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-4 flex gap-3"><XCircle size={18} className="text-red-500" /><p className="text-red-700 text-sm">{upload.erro}</p></div>}
