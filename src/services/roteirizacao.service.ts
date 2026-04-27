@@ -268,6 +268,18 @@ const pickFirstText = (...values: unknown[]): string | null => {
   return null
 }
 
+const extrairMotivoRemanescenteSaldoFinal = (item: Record<string, unknown>): string => {
+  return (
+    toText(item.motivo_detalhado_m6_2) ||
+    toText(item.motivo_final_remanescente_m6_2) ||
+    toText(item.motivo_final_remanescente_m5_4) ||
+    toText(item.motivo_final_remanescente_m5_3) ||
+    toText(item.motivo) ||
+    toText(item.status_triagem) ||
+    'Saldo final da roteirização'
+  )
+}
+
 const toRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   return value as Record<string, unknown>
@@ -466,28 +478,24 @@ export const roteirizacaoService = {
       if (!nroDocumento || !destinatario || !cidade || !uf) {
         throw new Error(`Remanescente M7 inválido (saldo_final_roteirizacao): índice ${index} sem campos mínimos`)
       }
-      const motivo = pickFirstText(
-        item.motivo_detalhado_m6_2,
-        item.motivo_final_remanescente_m6_2,
-        item.motivo_final_remanescente_m5_4,
-        item.motivo_final_remanescente_m5_3,
-      )
-      if (!motivo) {
-        throw new Error(`Remanescente M7 inválido (saldo_final_roteirizacao): nro_documento ${nroDocumento} sem motivo final`)
-      }
       return {
         rodada_id: rodadaId,
         nro_documento: nroDocumento,
         destinatario,
         cidade,
         uf,
-        motivo,
+        motivo: extrairMotivoRemanescenteSaldoFinal(item),
         etapa_origem: 'saldo_final_roteirizacao',
         grupo_remanescente: 'saldo_final_roteirizacao',
         payload_apoio_json: item,
       }
     })
     const registrosRemanescentes = [...registrosNaoRoteirizaveisM3, ...registrosSaldoFinal]
+    console.log('[PERSISTENCIA M7] remanescentes preparados', {
+      saldoFinal: remanescentesM7.saldo_final_roteirizacao.length,
+      naoRoteirizaveisM3: remanescentesM7.nao_roteirizaveis_m3.length,
+      registrosRemanescentes: registrosRemanescentes.length,
+    })
 
     await supabase.from('manifestos_roteirizacao').delete().eq('rodada_id', rodadaId)
     await supabase.from('manifestos_itens').delete().eq('rodada_id', rodadaId)
@@ -512,6 +520,7 @@ export const roteirizacaoService = {
       if (error) throw error
     }
     const totalRemanescentesSalvos = registrosRemanescentes.length
+    console.log('[PERSISTENCIA] remanescentes salvos:', totalRemanescentesSalvos)
     if (!Number.isFinite(registrosManifestos.reduce((acc, manifesto) => acc + toNumber(manifesto.peso_total, Number.NaN), 0))) {
       throw new Error('Manifesto M7 inválido: peso_final_m6_2 deve ser numérico em todos os manifestos')
     }
