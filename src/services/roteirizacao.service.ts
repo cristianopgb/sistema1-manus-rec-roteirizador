@@ -37,6 +37,8 @@ const CAMPOS_DATA_RANGE: Array<{ de: keyof FiltrosCarteira; ate: keyof FiltrosCa
   { de: 'data_nf_de', ate: 'data_nf_ate', coluna: 'data_nf' },
 ]
 
+const MOTOR_2_ROTEIRIZAR_TIMEOUT_MS = 900_000
+
 const normalizarCarteiraItem = (item: any): CarteiraCarga => {
   const { id, upload_id, status_validacao, erro_validacao, created_at, dados_originais_json, ...rest } = item
   return ({
@@ -264,6 +266,15 @@ const toPayloadNumber = (value: unknown): number | null => {
   }
   const parsed = Number(normalized)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+const isMotor2TimeoutError = (err: unknown): boolean => {
+  if (!(err instanceof Error)) return false
+  const message = err.message.toLowerCase()
+  return err.name === 'TimeoutError'
+    || err.name === 'AbortError'
+    || message.includes('signal timed out')
+    || message.includes('timed out')
 }
 
 const toText = (value: unknown): string | null => {
@@ -917,13 +928,18 @@ export const roteirizacaoService = {
       console.log('[Motor2] Payload final:', payload)
     }
 
+    const inicioChamadaMotor = Date.now()
+    console.log('[MOTOR2] timeout roteirizar ms:', MOTOR_2_ROTEIRIZAR_TIMEOUT_MS)
+    console.log('[MOTOR2] chamada iniciada:', finalUrl)
+
     try {
       const response = await fetch(finalUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(180_000),
+        signal: AbortSignal.timeout(MOTOR_2_ROTEIRIZAR_TIMEOUT_MS),
       })
+      console.log('[MOTOR2] resposta recebida em ms:', Date.now() - inicioChamadaMotor)
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -942,7 +958,18 @@ export const roteirizacaoService = {
 
       resposta = await response.json() as RespostaMotor
     } catch (err) {
-      const mensagem = err instanceof Error ? err.message : 'Erro de comunicação com o motor'
+      const timeoutError = isMotor2TimeoutError(err)
+      if (timeoutError) {
+        console.error('[MOTOR2] timeout aguardando resposta do motor', {
+          timeoutMs: MOTOR_2_ROTEIRIZAR_TIMEOUT_MS,
+          elapsedMs: Date.now() - inicioChamadaMotor,
+          finalUrl,
+        })
+      }
+
+      const mensagem = timeoutError
+        ? 'Timeout ao aguardar resposta do Motor 2. O processamento excedeu o limite de 15 minutos no Sistema 1.'
+        : (err instanceof Error ? err.message : 'Erro de comunicação com o motor')
       const status = err instanceof Error && /HTTP (\d{3})/.test(err.message)
         ? Number(err.message.match(/HTTP (\d{3})/)?.[1])
         : undefined
