@@ -338,9 +338,10 @@ const mapearStatusMotorParaStatusRodada = (
   statusMotor: unknown,
   houveErroPosProcessamento: boolean,
 ): RodadaRoteirizacao['status'] => {
+  if (houveErroPosProcessamento) return 'erro'
   if (statusMotor === 'erro') return 'erro'
   if (statusMotor === 'ok') return 'sucesso'
-  return houveErroPosProcessamento ? 'erro' : 'sucesso'
+  return 'sucesso'
 }
 
 export const roteirizacaoService = {
@@ -363,6 +364,13 @@ export const roteirizacaoService = {
       paradas_m7: paradasM7.length,
       saldo_final_roteirizacao: remanescentesM7.saldo_final_roteirizacao.length,
       nao_roteirizaveis_m3: remanescentesM7.nao_roteirizaveis_m3.length,
+    })
+    console.log('[PERSISTENCIA M7] antes de salvar', {
+      manifestosM7: manifestosM7.length,
+      itensM7: itensM7.length,
+      paradasM7: paradasM7.length,
+      saldoFinal: remanescentesM7.saldo_final_roteirizacao.length,
+      naoRoteirizaveisM3: remanescentesM7.nao_roteirizaveis_m3.length,
     })
 
     const registrosManifestos = manifestosM7.map((manifestoRaw, index) => {
@@ -399,11 +407,15 @@ export const roteirizacaoService = {
       if (!manifestoId) throw new Error(`Item M7 inválido: id_linha_pipeline ${toText(item.id_linha_pipeline) ?? `indice_${index}`} sem manifesto_id`)
       const idLinhaPipeline = toText(item.id_linha_pipeline)
       if (!idLinhaPipeline) throw new Error(`Item M7 inválido: índice ${index} sem id_linha_pipeline`)
-      const obrigatorios = ['nro_documento', 'destinatario', 'cidade', 'uf', 'peso_calculado', 'ordem_entrega_doc_m7', 'ordem_carregamento_doc_m7', 'ordem_parada_m7'] as const
+      const obrigatorios = ['nro_documento', 'destinatario', 'cidade', 'uf', 'peso_calculado', 'ordem_entrega_doc_m7', 'ordem_carregamento_doc_m7'] as const
       for (const campo of obrigatorios) {
         if (item[campo] === undefined || item[campo] === null || (typeof item[campo] === 'string' && String(item[campo]).trim() === '')) {
           throw new Error(`Item M7 inválido: id_linha_pipeline ${idLinhaPipeline} sem ${campo}`)
         }
+      }
+      const ordemParadaM7 = item.ordem_parada_m7 ?? item.ordem_entrega_parada_m7
+      if (ordemParadaM7 === undefined || ordemParadaM7 === null || String(ordemParadaM7).trim() === '') {
+        throw new Error(`Item M7 inválido: id_linha_pipeline ${idLinhaPipeline} sem ordem_parada_m7 ou ordem_entrega_parada_m7`)
       }
       return {
         rodada_id: rodadaId,
@@ -516,12 +528,14 @@ export const roteirizacaoService = {
       throw new Error('Item M7 inválido: peso_calculado deve ser numérico em todos os itens')
     }
     const resumoNegocio = toRecord(resposta.resumo_negocio)
-    if (!resumoNegocio || resumoNegocio.total_carteira === undefined || resumoNegocio.total_carteira === null) {
-      throw new Error('Contrato M7 inválido: campo obrigatório resumo_negocio.total_carteira ausente')
+    const respostaRecord = resposta as unknown as Record<string, unknown>
+    const totalCarteiraRaw = respostaRecord.total_carteira ?? resumoNegocio?.total_carteira
+    if (totalCarteiraRaw === undefined || totalCarteiraRaw === null) {
+      throw new Error('Contrato M7 inválido: campo obrigatório total_carteira (raiz ou resumo_negocio.total_carteira) ausente')
     }
-    const totalCarteira = Math.trunc(toNumber(resumoNegocio.total_carteira, Number.NaN))
+    const totalCarteira = Math.trunc(toNumber(totalCarteiraRaw, Number.NaN))
     if (!Number.isFinite(totalCarteira)) {
-      throw new Error('Contrato M7 inválido: resumo_negocio.total_carteira deve ser numérico')
+      throw new Error('Contrato M7 inválido: total_carteira (raiz ou resumo_negocio.total_carteira) deve ser numérico')
     }
     const resumoExecucao = toRecord(resposta.resumo_execucao)
     const temposMs = toRecord(resumoExecucao?.tempos_ms)
@@ -587,13 +601,11 @@ export const roteirizacaoService = {
       .eq('id', rodadaId)
     if (rodadaAggError) throw rodadaAggError
 
-    console.log('[PERSISTENCIA M7]', {
+    console.log('[PERSISTENCIA M7] salvos', {
       manifestosSalvos: totalManifestosSalvos,
       itensSalvos: totalItensSalvos,
       remanescentesSalvos: totalRemanescentesSalvos,
-      kmTotal: kmTotalRodada,
-      ocupacaoMedia: ocupacaoMediaRodada,
-      tempoExecucaoMs,
+      estatisticasSalvas: true,
     })
     void resumoSequenciamentoM7
     console.log('[PERSISTENCIA] estatisticas salvas para rodada:', rodadaId)
