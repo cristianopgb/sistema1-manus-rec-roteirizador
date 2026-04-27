@@ -294,18 +294,6 @@ const pickFirstText = (...values: unknown[]): string | null => {
   return null
 }
 
-const extrairMotivoRemanescenteSaldoFinal = (item: Record<string, unknown>): string => {
-  return (
-    toText(item.motivo_detalhado_m6_2) ||
-    toText(item.motivo_final_remanescente_m6_2) ||
-    toText(item.motivo_final_remanescente_m5_4) ||
-    toText(item.motivo_final_remanescente_m5_3) ||
-    toText(item.motivo) ||
-    toText(item.status_triagem) ||
-    'Saldo final da roteirização'
-  )
-}
-
 const toRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   return value as Record<string, unknown>
@@ -547,44 +535,91 @@ export const roteirizacaoService = {
       }
     })
 
+    const toTextRemanescente = (valor: unknown): string => {
+      return String(valor ?? '').trim()
+    }
+
+    const toNumberOrNull = (valor: unknown): number | null => {
+      const n = Number(valor)
+      return Number.isFinite(n) ? n : null
+    }
+
+    const { error: payloadApoioProbeError } = await supabase
+      .from('remanescentes_roteirizacao')
+      .select('id, payload_apoio_json')
+      .limit(1)
+    const inserirPayloadApoio = !payloadApoioProbeError
+
     const registrosNaoRoteirizaveisM3 = remanescentesM7.nao_roteirizaveis_m3.map((item, index) => {
-      const nroDocumento = toText(item.nro_documento)
-      const destinatario = toText(item.destinatario)
-      const cidade = toText(item.cidade)
-      const uf = toText(item.uf)
-      const motivoTriagem = toText(item.motivo_triagem)
-      const statusTriagem = toText(item.status_triagem)
+      const nroDocumento = toTextRemanescente(item.nro_documento)
+      const destinatario = toTextRemanescente(item.destinatario)
+      const cidade = toTextRemanescente(item.cidade)
+      const uf = toTextRemanescente(item.uf)
+      const motivoTriagem = toTextRemanescente(item.motivo_triagem)
+      const statusTriagem = toTextRemanescente(item.status_triagem)
       if (!nroDocumento || !destinatario || !cidade || !uf) {
         throw new Error(`Remanescente M7 inválido (nao_roteirizaveis_m3): índice ${index} sem campos mínimos`)
       }
-      return {
+      const registroBase = {
         rodada_id: rodadaId,
+        tipo_remanescente: 'nao_roteirizavel_triagem',
+        id_linha_pipeline: toTextRemanescente(item.id_linha_pipeline) || null,
         nro_documento: nroDocumento,
         destinatario,
         cidade,
         uf,
+        peso_calculado: toNumberOrNull(item.peso_calculado),
+        distancia_rodoviaria_est_km: toNumberOrNull(item.distancia_rodoviaria_est_km),
+        mesorregiao: toTextRemanescente(item.mesorregiao) || null,
+        subregiao: toTextRemanescente(item.subregiao) || null,
+        status_triagem: statusTriagem || null,
+        motivo_triagem: motivoTriagem || null,
         motivo: motivoTriagem || statusTriagem || 'Não roteirizável na triagem',
         etapa_origem: 'm3_triagem',
       }
+      return inserirPayloadApoio ? { ...registroBase, payload_apoio_json: item } : registroBase
     })
 
     const registrosSaldoFinal = remanescentesM7.saldo_final_roteirizacao.map((item, index) => {
-      const nroDocumento = toText(item.nro_documento)
-      const destinatario = toText(item.destinatario)
-      const cidade = toText(item.cidade)
-      const uf = toText(item.uf)
+      const nroDocumento = toTextRemanescente(item.nro_documento)
+      const destinatario = toTextRemanescente(item.destinatario)
+      const cidade = toTextRemanescente(item.cidade)
+      const uf = toTextRemanescente(item.uf)
+      const motivoDetalhadoM62 = toTextRemanescente(item.motivo_detalhado_m6_2)
+      const motivoFinalM62 = toTextRemanescente(item.motivo_final_remanescente_m6_2)
+      const motivoFinalM54 = toTextRemanescente(item.motivo_final_remanescente_m5_4)
+      const motivoFinalM53 = toTextRemanescente(item.motivo_final_remanescente_m5_3)
+      const motivoExistente = toTextRemanescente(item.motivo)
       if (!nroDocumento || !destinatario || !cidade || !uf) {
         throw new Error(`Remanescente M7 inválido (saldo_final_roteirizacao): índice ${index} sem campos mínimos`)
       }
-      return {
+      const registroBase = {
         rodada_id: rodadaId,
+        tipo_remanescente: 'roteirizavel_saldo_final',
+        id_linha_pipeline: toTextRemanescente(item.id_linha_pipeline) || null,
         nro_documento: nroDocumento,
         destinatario,
         cidade,
         uf,
-        motivo: extrairMotivoRemanescenteSaldoFinal(item),
+        peso_calculado: toNumberOrNull(item.peso_calculado),
+        distancia_rodoviaria_est_km: toNumberOrNull(item.distancia_rodoviaria_est_km),
+        mesorregiao: toTextRemanescente(item.mesorregiao) || null,
+        subregiao: toTextRemanescente(item.subregiao) || null,
+        corredor_30g: toTextRemanescente(item.corredor_30g) || null,
+        corredor_30g_idx: toNumberOrNull(item.corredor_30g_idx),
+        motivo_detalhado_m6_2: motivoDetalhadoM62 || null,
+        motivo_final_remanescente_m6_2: motivoFinalM62 || null,
+        motivo_final_remanescente_m5_4: motivoFinalM54 || null,
+        motivo_final_remanescente_m5_3: motivoFinalM53 || null,
+        motivo: motivoDetalhadoM62 ||
+          motivoFinalM62 ||
+          motivoFinalM54 ||
+          motivoFinalM53 ||
+          motivoExistente ||
+          'Saldo final da roteirização',
         etapa_origem: 'saldo_final_roteirizacao',
       }
+      return inserirPayloadApoio ? { ...registroBase, payload_apoio_json: item } : registroBase
     })
     const registrosRemanescentes = [...registrosNaoRoteirizaveisM3, ...registrosSaldoFinal]
     console.log('[PERSISTENCIA] remanescentes preparados:', registrosRemanescentes.length)
@@ -1093,7 +1128,11 @@ export const roteirizacaoService = {
   }> {
     const [manifestosRes, remanescentesRes, estatisticasRes] = await Promise.all([
       supabase.from('manifestos_roteirizacao').select('*').eq('rodada_id', rodadaId).order('manifesto_id'),
-      supabase.from('remanescentes_roteirizacao').select('*').eq('rodada_id', rodadaId).order('created_at'),
+      supabase
+        .from('remanescentes_roteirizacao')
+        .select('id, rodada_id, tipo_remanescente, id_linha_pipeline, nro_documento, destinatario, cidade, uf, peso_calculado, distancia_rodoviaria_est_km, mesorregiao, subregiao, corredor_30g, corredor_30g_idx, status_triagem, motivo_triagem, motivo_detalhado_m6_2, motivo_final_remanescente_m6_2, motivo_final_remanescente_m5_4, motivo_final_remanescente_m5_3, motivo, etapa_origem, created_at')
+        .eq('rodada_id', rodadaId)
+        .order('created_at'),
       supabase.from('estatisticas_roteirizacao').select('*').eq('rodada_id', rodadaId).maybeSingle(),
     ])
 

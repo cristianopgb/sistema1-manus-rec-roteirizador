@@ -15,6 +15,35 @@ import { roteirizacaoService } from '@/services/roteirizacao.service'
 import { gerarPdfManifestoOperacional } from '@/services/pdf.service'
 import toast from 'react-hot-toast'
 
+type TipoRemanescenteTab = 'todos' | 'roteirizavel_saldo_final' | 'nao_roteirizavel_triagem'
+
+const normalizarTipoRemanescente = (r: RemanescenteRoteirizacao): 'roteirizavel_saldo_final' | 'nao_roteirizavel_triagem' | 'desconhecido' => {
+  if (r.tipo_remanescente === 'roteirizavel_saldo_final' || r.tipo_remanescente === 'nao_roteirizavel_triagem') {
+    return r.tipo_remanescente
+  }
+  if (r.etapa_origem === 'm3_triagem') return 'nao_roteirizavel_triagem'
+  if (r.etapa_origem === 'saldo_final_roteirizacao') return 'roteirizavel_saldo_final'
+  return 'desconhecido'
+}
+
+const formatarNumeroCurto = (valor: number | null | undefined, sufixo?: string): string => {
+  if (typeof valor !== 'number' || !Number.isFinite(valor)) return '-'
+  const numero = valor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })
+  return sufixo ? `${numero} ${sufixo}` : numero
+}
+
+const formatarCidadeUf = (cidade: string | null, uf: string | null): string => {
+  const cidadeTexto = String(cidade ?? '').trim()
+  const ufTexto = String(uf ?? '').trim()
+  if (!cidadeTexto && !ufTexto) return '-'
+  return `${cidadeTexto || '-'} / ${ufTexto || '-'}`
+}
+
+const textoSeguro = (valor: unknown): string => {
+  const txt = String(valor ?? '').trim()
+  return txt || '-'
+}
+
 export function HistoricoPage() {
   const { isMaster, filialAtiva } = useAuth()
   const [searchParams] = useSearchParams()
@@ -35,6 +64,12 @@ export function HistoricoPage() {
   const [itensManifesto, setItensManifesto] = useState<ManifestoItemRoteirizacao[]>([])
   const [itensOriginais, setItensOriginais] = useState<ManifestoItemRoteirizacao[]>([])
   const [manifestoLoading, setManifestoLoading] = useState(false)
+  const [subabaRemanescentes, setSubabaRemanescentes] = useState<TipoRemanescenteTab>('todos')
+  const [buscaRemanescentes, setBuscaRemanescentes] = useState('')
+  const [filtroTipoRemanescente, setFiltroTipoRemanescente] = useState<'todos' | 'roteirizavel_saldo_final' | 'nao_roteirizavel_triagem'>('todos')
+  const [filtroMesorregiao, setFiltroMesorregiao] = useState('todos')
+  const [filtroSubregiao, setFiltroSubregiao] = useState('todos')
+  const [filtroMotivo, setFiltroMotivo] = useState('todos')
 
   useEffect(() => {
     const fetchRodadas = async () => {
@@ -75,6 +110,12 @@ export function HistoricoPage() {
       setManifestos(detalhes.manifestos)
       setRemanescentes(detalhes.remanescentes)
       setEstatisticas(detalhes.estatisticas)
+      setSubabaRemanescentes('todos')
+      setBuscaRemanescentes('')
+      setFiltroTipoRemanescente('todos')
+      setFiltroMesorregiao('todos')
+      setFiltroSubregiao('todos')
+      setFiltroMotivo('todos')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erro ao carregar detalhes da rodada')
     } finally {
@@ -241,6 +282,56 @@ export function HistoricoPage() {
     itensManifesto.filter((item) => Boolean(item.inicio_entrega || item.fim_entrega || (item as unknown as Record<string, unknown>).data_agenda))
   ), [itensManifesto])
 
+  const remanescentesNormalizados = useMemo(() => remanescentes.map((item) => ({
+    ...item,
+    tipo_normalizado: normalizarTipoRemanescente(item),
+  })), [remanescentes])
+
+  const resumoRemanescentes = useMemo(() => {
+    const total = remanescentesNormalizados.length
+    const roteirizaveis = remanescentesNormalizados.filter((item) => item.tipo_normalizado === 'roteirizavel_saldo_final')
+    const naoRoteirizaveis = remanescentesNormalizados.filter((item) => item.tipo_normalizado === 'nao_roteirizavel_triagem')
+    const pesoTotal = remanescentesNormalizados.reduce((acc, item) => acc + (item.peso_calculado ?? 0), 0)
+    const kmMedio = total > 0
+      ? remanescentesNormalizados.reduce((acc, item) => acc + (item.distancia_rodoviaria_est_km ?? 0), 0) / total
+      : 0
+    return { total, roteirizaveis: roteirizaveis.length, naoRoteirizaveis: naoRoteirizaveis.length, pesoTotal, kmMedio }
+  }, [remanescentesNormalizados])
+
+  const opcoesMesorregiao = useMemo(
+    () => Array.from(new Set(remanescentesNormalizados.map((item) => textoSeguro(item.mesorregiao)).filter((v) => v !== '-'))).sort(),
+    [remanescentesNormalizados],
+  )
+
+  const opcoesSubregiao = useMemo(
+    () => Array.from(new Set(remanescentesNormalizados.map((item) => textoSeguro(item.subregiao)).filter((v) => v !== '-'))).sort(),
+    [remanescentesNormalizados],
+  )
+
+  const opcoesMotivo = useMemo(
+    () => Array.from(new Set(remanescentesNormalizados.map((item) => textoSeguro(item.motivo)).filter((v) => v !== '-'))).slice(0, 50),
+    [remanescentesNormalizados],
+  )
+
+  const remanescentesFiltrados = useMemo(() => {
+    const termo = buscaRemanescentes.toLowerCase().trim()
+    return remanescentesNormalizados
+      .filter((item) => subabaRemanescentes === 'todos' || item.tipo_normalizado === subabaRemanescentes)
+      .filter((item) => filtroTipoRemanescente === 'todos' || item.tipo_normalizado === filtroTipoRemanescente)
+      .filter((item) => filtroMesorregiao === 'todos' || textoSeguro(item.mesorregiao) === filtroMesorregiao)
+      .filter((item) => filtroSubregiao === 'todos' || textoSeguro(item.subregiao) === filtroSubregiao)
+      .filter((item) => filtroMotivo === 'todos' || textoSeguro(item.motivo) === filtroMotivo)
+      .filter((item) => {
+        if (!termo) return true
+        const indexavel = [
+          item.nro_documento,
+          item.destinatario,
+          item.cidade,
+        ].map((value) => String(value ?? '').toLowerCase())
+        return indexavel.some((valor) => valor.includes(termo))
+      })
+  }, [buscaRemanescentes, filtroMesorregiao, filtroMotivo, filtroSubregiao, filtroTipoRemanescente, remanescentesNormalizados, subabaRemanescentes])
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -345,17 +436,137 @@ export function HistoricoPage() {
           )}
 
           {!detalhesLoading && tabAtiva === 'remanescentes' && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead><tr className="text-left border-b"><th className="py-2">Documento</th><th>Cliente</th><th>Cidade</th><th>Motivo</th><th>Etapa</th></tr></thead>
-                <tbody>
-                  {remanescentes.map((r) => (
-                    <tr key={r.id} className="border-b">
-                      <td className="py-2">{r.nro_documento || '—'}</td><td>{r.destinatario || '—'}</td><td>{r.cidade || '—'} / {r.uf || '—'}</td><td>{r.motivo || '—'}</td><td>{r.etapa_origem || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
+                <div className="p-3 rounded-lg bg-gray-50 text-xs"><div className="text-gray-500">Total remanescentes</div><strong>{resumoRemanescentes.total}</strong></div>
+                <div className="p-3 rounded-lg bg-blue-50 text-xs"><div className="text-gray-500">Roteirizáveis não atendidas</div><strong>{resumoRemanescentes.roteirizaveis}</strong></div>
+                <div className="p-3 rounded-lg bg-amber-50 text-xs"><div className="text-gray-500">Não roteirizáveis na triagem</div><strong>{resumoRemanescentes.naoRoteirizaveis}</strong></div>
+                <div className="p-3 rounded-lg bg-gray-50 text-xs"><div className="text-gray-500">Peso total remanescente</div><strong>{formatarNumeroCurto(resumoRemanescentes.pesoTotal, 'kg')}</strong></div>
+                <div className="p-3 rounded-lg bg-gray-50 text-xs"><div className="text-gray-500">KM médio remanescente</div><strong>{formatarNumeroCurto(resumoRemanescentes.kmMedio, 'km')}</strong></div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { key: 'todos', label: `Todos (${resumoRemanescentes.total})` },
+                  { key: 'roteirizavel_saldo_final', label: `Roteirizáveis não atendidas (${resumoRemanescentes.roteirizaveis})` },
+                  { key: 'nao_roteirizavel_triagem', label: `Não roteirizáveis na triagem (${resumoRemanescentes.naoRoteirizaveis})` },
+                ].map((aba) => (
+                  <button
+                    key={aba.key}
+                    className={`px-3 py-1.5 rounded-lg text-xs ${subabaRemanescentes === aba.key ? 'bg-brand-100 text-brand-800' : 'bg-gray-100 text-gray-700'}`}
+                    onClick={() => setSubabaRemanescentes(aba.key as TipoRemanescenteTab)}
+                  >
+                    {aba.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2 text-xs">
+                <input className="input text-xs h-9" placeholder="Buscar documento, cliente ou cidade" value={buscaRemanescentes} onChange={(e) => setBuscaRemanescentes(e.target.value)} />
+                <select className="input text-xs h-9" value={filtroTipoRemanescente} onChange={(e) => setFiltroTipoRemanescente(e.target.value as typeof filtroTipoRemanescente)}>
+                  <option value="todos">Tipo: Todos</option>
+                  <option value="roteirizavel_saldo_final">Roteirizável não atendida</option>
+                  <option value="nao_roteirizavel_triagem">Não roteirizável na triagem</option>
+                </select>
+                <select className="input text-xs h-9" value={filtroMesorregiao} onChange={(e) => setFiltroMesorregiao(e.target.value)}>
+                  <option value="todos">Mesorregião: Todas</option>
+                  {opcoesMesorregiao.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+                <select className="input text-xs h-9" value={filtroSubregiao} onChange={(e) => setFiltroSubregiao(e.target.value)}>
+                  <option value="todos">Sub-região: Todas</option>
+                  {opcoesSubregiao.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+                <select className="input text-xs h-9" value={filtroMotivo} onChange={(e) => setFiltroMotivo(e.target.value)}>
+                  <option value="todos">Motivo: Todos</option>
+                  {opcoesMotivo.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </div>
+
+              <div className="max-h-[360px] overflow-y-auto overflow-x-auto rounded-lg border">
+                <table className="min-w-[1400px] text-[11px] w-full">
+                  <thead>
+                    {subabaRemanescentes === 'nao_roteirizavel_triagem' && (
+                      <tr className="text-left border-b sticky top-0 z-10 bg-white">
+                        {['Documento', 'Cliente', 'Cidade/UF', 'Peso', 'KM', 'Mesorregião', 'Sub-região', 'Status triagem', 'Motivo triagem', 'Etapa'].map((h) => <th key={h} className="px-2 py-1.5">{h}</th>)}
+                      </tr>
+                    )}
+                    {subabaRemanescentes === 'roteirizavel_saldo_final' && (
+                      <tr className="text-left border-b sticky top-0 z-10 bg-white">
+                        {['Documento', 'Cliente', 'Cidade/UF', 'Peso', 'KM', 'Mesorregião', 'Sub-região', 'Corredor', 'Índice corredor', 'Motivo M6.2 detalhado', 'Motivo M6.2 final', 'Motivo M5.4', 'Motivo M5.3', 'Motivo exibido', 'Etapa'].map((h) => <th key={h} className="px-2 py-1.5">{h}</th>)}
+                      </tr>
+                    )}
+                    {subabaRemanescentes === 'todos' && (
+                      <tr className="text-left border-b sticky top-0 z-10 bg-white">
+                        {['Tipo', 'Documento', 'Cliente', 'Cidade/UF', 'Peso', 'KM', 'Mesorregião', 'Sub-região', 'Motivo exibido', 'Etapa'].map((h) => <th key={h} className="px-2 py-1.5">{h}</th>)}
+                      </tr>
+                    )}
+                  </thead>
+                  <tbody>
+                    {remanescentesFiltrados.map((r) => (
+                      <tr key={r.id} className="border-b">
+                        {subabaRemanescentes === 'nao_roteirizavel_triagem' && (
+                          <>
+                            <td className="px-2 py-1.5">{textoSeguro(r.nro_documento)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.destinatario)}>{textoSeguro(r.destinatario)}</td>
+                            <td className="px-2 py-1.5">{formatarCidadeUf(r.cidade, r.uf)}</td>
+                            <td className="px-2 py-1.5">{formatarNumeroCurto(r.peso_calculado, 'kg')}</td>
+                            <td className="px-2 py-1.5">{formatarNumeroCurto(r.distancia_rodoviaria_est_km, 'km')}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.mesorregiao)}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.subregiao)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.status_triagem)}>{textoSeguro(r.status_triagem)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.motivo_triagem)}>{textoSeguro(r.motivo_triagem)}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.etapa_origem)}</td>
+                          </>
+                        )}
+                        {subabaRemanescentes === 'roteirizavel_saldo_final' && (
+                          <>
+                            <td className="px-2 py-1.5">{textoSeguro(r.nro_documento)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.destinatario)}>{textoSeguro(r.destinatario)}</td>
+                            <td className="px-2 py-1.5">{formatarCidadeUf(r.cidade, r.uf)}</td>
+                            <td className="px-2 py-1.5">{formatarNumeroCurto(r.peso_calculado, 'kg')}</td>
+                            <td className="px-2 py-1.5">{formatarNumeroCurto(r.distancia_rodoviaria_est_km, 'km')}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.mesorregiao)}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.subregiao)}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.corredor_30g)}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.corredor_30g_idx)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.motivo_detalhado_m6_2)}>{textoSeguro(r.motivo_detalhado_m6_2)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.motivo_final_remanescente_m6_2)}>{textoSeguro(r.motivo_final_remanescente_m6_2)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.motivo_final_remanescente_m5_4)}>{textoSeguro(r.motivo_final_remanescente_m5_4)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.motivo_final_remanescente_m5_3)}>{textoSeguro(r.motivo_final_remanescente_m5_3)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.motivo)}>{textoSeguro(r.motivo)}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.etapa_origem)}</td>
+                          </>
+                        )}
+                        {subabaRemanescentes === 'todos' && (
+                          <>
+                            <td className="px-2 py-1.5">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] ${r.tipo_normalizado === 'roteirizavel_saldo_final' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'}`}>
+                                {r.tipo_normalizado === 'roteirizavel_saldo_final' ? 'Roteirizável não atendida' : 'Não roteirizável'}
+                              </span>
+                            </td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.nro_documento)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.destinatario)}>{textoSeguro(r.destinatario)}</td>
+                            <td className="px-2 py-1.5">{formatarCidadeUf(r.cidade, r.uf)}</td>
+                            <td className="px-2 py-1.5">{formatarNumeroCurto(r.peso_calculado, 'kg')}</td>
+                            <td className="px-2 py-1.5">{formatarNumeroCurto(r.distancia_rodoviaria_est_km, 'km')}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.mesorregiao)}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.subregiao)}</td>
+                            <td className="px-2 py-1.5 max-w-[180px] truncate" title={textoSeguro(r.motivo)}>{textoSeguro(r.motivo)}</td>
+                            <td className="px-2 py-1.5">{textoSeguro(r.etapa_origem)}</td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                    {remanescentesFiltrados.length === 0 && (
+                      <tr>
+                        <td className="px-2 py-2 text-gray-400" colSpan={subabaRemanescentes === 'todos' ? 10 : subabaRemanescentes === 'roteirizavel_saldo_final' ? 15 : 10}>
+                          Sem remanescentes para os filtros selecionados.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

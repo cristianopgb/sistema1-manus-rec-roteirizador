@@ -504,7 +504,7 @@ export function RoteirizacaoPage() {
           columns={colunasCarteira}
           title="Primeiras linhas reais da carteira"
           total={upload.totalLinhas}
-          maxHeightClassName="max-h-[55vh]"
+          maxHeightClassName="max-h-[360px]"
         />
 
         <div className="flex justify-end gap-3"><button className="btn-secondary" onClick={reiniciar}>Cancelar</button><button className="btn-primary" onClick={confirmarPreview}><CheckCircle size={16} /> Ir para Roteirização</button></div>
