@@ -253,17 +253,18 @@ export interface CarteiraCargaContratoMotor {
 
 // --- Resposta do Motor (Sistema 2) ---
 export interface RespostaMotor {
-  status: 'sucesso' | 'erro' | 'parcial'
+  status: 'ok' | 'sucesso' | 'erro' | 'parcial'
   mensagem?: string
   pipeline_real_ate?: string
   modo_resposta?: string
   resposta_truncada?: boolean
   erro?: { codigo: string; mensagem: string } | null
-  resumo: ResumoMotor
+  resumo?: ResumoMotor
   resultado_roteirizacao?: Record<string, unknown>[]
   itens_manifestos?: Record<string, unknown>[]
   manifestos_fechados?: Record<string, unknown>[]
   manifestos_compostos?: Record<string, unknown>[]
+  paradas_m7?: Record<string, unknown>[]
   manifestos_sequenciamento_resumo_m7?: Record<string, unknown>[]
   tentativas_sequenciamento_m7?: Record<string, unknown>[]
   diagnostico_recuperacao_coordenadas_m7?: Record<string, unknown>
@@ -275,15 +276,15 @@ export interface RespostaMotor {
   resumo_execucao?: Record<string, unknown>
   resumo_negocio?: Record<string, unknown>
   contexto_rodada?: Record<string, unknown>
-  encadeamento: EtapaPipeline[]
-  manifestos: ManifestoMotor[]
+  encadeamento?: EtapaPipeline[]
+  manifestos?: ManifestoMotor[]
   manifestos_m7?: ManifestoMotorEstruturado[]
   itens_manifestos_sequenciados_m7?: ItemManifestoEstruturado[]
-  nao_roteirizados: CargaNaoRoteirizada[]
-  cargas_agendamento_futuro: CargaNaoRoteirizada[]
-  cargas_agenda_vencida: CargaNaoRoteirizada[]
-  cargas_excecao_triagem: CargaNaoRoteirizada[]
-  cargas_nao_alocadas: CargaNaoRoteirizada[]
+  nao_roteirizados?: CargaNaoRoteirizada[]
+  cargas_agendamento_futuro?: CargaNaoRoteirizada[]
+  cargas_agenda_vencida?: CargaNaoRoteirizada[]
+  cargas_excecao_triagem?: CargaNaoRoteirizada[]
+  cargas_nao_alocadas?: CargaNaoRoteirizada[]
 }
 
 export interface ManifestoMotorEstruturado {
