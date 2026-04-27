@@ -468,21 +468,14 @@ export const roteirizacaoService = {
       if (!nroDocumento || !destinatario || !cidade || !uf) {
         throw new Error(`Remanescente M7 inválido (nao_roteirizaveis_m3): índice ${index} sem campos mínimos`)
       }
-      if (!motivoTriagem || !statusTriagem) {
-        throw new Error(`Remanescente M7 inválido (nao_roteirizaveis_m3): nro_documento ${nroDocumento} sem motivo_triagem/status_triagem`)
-      }
       return {
         rodada_id: rodadaId,
         nro_documento: nroDocumento,
         destinatario,
         cidade,
         uf,
-        motivo: motivoTriagem,
+        motivo: motivoTriagem || statusTriagem || 'Não roteirizável na triagem',
         etapa_origem: 'm3_triagem',
-        payload_apoio_json: {
-          ...item,
-          grupo_remanescente: 'nao_roteirizaveis_m3',
-        },
       }
     })
 
@@ -502,10 +495,6 @@ export const roteirizacaoService = {
         uf,
         motivo: extrairMotivoRemanescenteSaldoFinal(item),
         etapa_origem: 'saldo_final_roteirizacao',
-        payload_apoio_json: {
-          ...item,
-          grupo_remanescente: 'saldo_final_roteirizacao',
-        },
       }
     })
     const registrosRemanescentes = [...registrosNaoRoteirizaveisM3, ...registrosSaldoFinal]
@@ -516,10 +505,10 @@ export const roteirizacaoService = {
       registrosRemanescentes: registrosRemanescentes.length,
     })
 
-    const { error: deleteManifestosError } = await supabase.from('manifestos_roteirizacao').delete().eq('rodada_id', rodadaId)
-    if (deleteManifestosError) throw deleteManifestosError
     const { error: deleteItensError } = await supabase.from('manifestos_itens').delete().eq('rodada_id', rodadaId)
     if (deleteItensError) throw deleteItensError
+    const { error: deleteManifestosError } = await supabase.from('manifestos_roteirizacao').delete().eq('rodada_id', rodadaId)
+    if (deleteManifestosError) throw deleteManifestosError
     const { error: deleteRemanescentesError } = await supabase.from('remanescentes_roteirizacao').delete().eq('rodada_id', rodadaId)
     if (deleteRemanescentesError) throw deleteRemanescentesError
     const { error: deleteEstatisticasError } = await supabase.from('estatisticas_roteirizacao').delete().eq('rodada_id', rodadaId)
@@ -925,7 +914,7 @@ export const roteirizacaoService = {
         status: statusFinal,
         payload_enviado: payload as unknown as Record<string, unknown>,
         resposta_motor: resposta as unknown as Record<string, unknown>,
-        erro_mensagem: statusFinal === 'erro' ? (erroPosRetorno || resposta.erro?.mensagem || 'Erro no pós-processamento') : null,
+        erro_mensagem: statusFinal === 'erro' ? (erroPosRetorno || resposta.erro?.mensagem || null) : null,
       }
       if (statusFinal === 'erro') {
         rodadaPayload.tempo_processamento_ms = tempoMs
