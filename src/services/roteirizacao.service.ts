@@ -223,6 +223,18 @@ const toNumber = (value: unknown, fallback = 0): number => {
   return fallback
 }
 
+const normalizarPerfilVeiculo = (valor: unknown): string => {
+  return String(valor ?? '')
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+const roundCurrency = (valor: number): number => {
+  return Math.round((valor + Number.EPSILON) * 100) / 100
+}
+
 const pickFirstNumber = (...values: unknown[]): number | null => {
   for (const value of values) {
     if (value === null || value === undefined) continue
@@ -377,7 +389,6 @@ export const roteirizacaoService = {
     veiculos: Array<{ id: string; perfil?: string | null; tipo?: string | null; qtd_eixos?: number | null; capacidade_peso_kg?: number | null }>
   ): Promise<void> {
     console.log('[PERSISTENCIA] iniciando persistência estruturada da rodada', rodadaId)
-    void veiculos
     validarContratoM7(resposta)
     const manifestosM7 = extrairManifestosM7(resposta)
     const itensM7 = extrairItensM7(resposta)
@@ -399,11 +410,34 @@ export const roteirizacaoService = {
       naoRoteirizaveisM3: remanescentesM7.nao_roteirizaveis_m3.length,
     })
 
+    const dataBaseRoteirizacao = pickFirstText(
+      toRecord(resposta.contexto_rodada)?.data_base_roteirizacao,
+      toRecord(resposta.resumo)?.data_base_roteirizacao,
+      toRecord(resposta.resumo_negocio)?.data_base_roteirizacao,
+    )
+    const dataBaseTs = dataBaseRoteirizacao ? new Date(dataBaseRoteirizacao).getTime() : Number.NaN
+    const usarVigencia = Number.isFinite(dataBaseTs)
+
+    const { data: tabelaAnttData, error: tabelaAnttError } = await supabase
+      .from('tabela_antt')
+      .select('codigo_tipo, nome_tipo, num_eixos, coef_ccd, coef_cc, vigencia_inicio, vigencia_fim, ativa')
+      .eq('ativa', true)
+      .order('vigencia_inicio', { ascending: false })
+    if (tabelaAnttError) throw tabelaAnttError
+    const tabelaCargaGeral = (tabelaAnttData ?? []).filter((item) => {
+      const nomeTipo = normalizarPerfilVeiculo(item.nome_tipo)
+      return item.codigo_tipo === 5 || nomeTipo === 'CARGA GERAL'
+    })
+
     const registrosManifestos = manifestosM7.map((manifestoRaw, index) => {
       const manifestoId = toText(manifestoRaw.manifesto_id)
       if (!manifestoId) throw new Error(`Manifesto M7 inválido: índice ${index} sem manifesto_id`)
-      const perfilFinal = toText(manifestoRaw.perfil_final_m6_2)
-      if (!perfilFinal) throw new Error(`Manifesto M7 inválido: manifesto_id ${manifestoId} sem perfil_final_m6_2`)
+      const perfilManifesto = toText(
+        manifestoRaw.perfil_final_m6_2
+        ?? manifestoRaw.veiculo_perfil
+        ?? manifestoRaw.veiculo_tipo
+      )
+      if (!perfilManifesto) throw new Error(`Manifesto M7 inválido: manifesto_id ${manifestoId} sem perfil de veículo`)
       if (manifestoRaw.peso_final_m6_2 === undefined || manifestoRaw.peso_final_m6_2 === null) {
         throw new Error(`Manifesto M7 inválido: manifesto_id ${manifestoId} sem peso_final_m6_2`)
       }
@@ -413,19 +447,74 @@ export const roteirizacaoService = {
       if (manifestoRaw.km_total_estimado_m6_2 === undefined || manifestoRaw.km_total_estimado_m6_2 === null) {
         throw new Error(`Manifesto M7 inválido: manifesto_id ${manifestoId} sem km_total_estimado_m6_2`)
       }
+
+      const veiculoCadastro = veiculos.find((veiculo) => {
+        return normalizarPerfilVeiculo(veiculo.perfil ?? veiculo.tipo) === normalizarPerfilVeiculo(perfilManifesto)
+      })
+      if (!veiculoCadastro) {
+        throw new Error(`Não foi possível resolver qtd_eixos: perfil ${perfilManifesto} não encontrado no cadastro de veículos`)
+      }
+      const qtdEixos = Math.trunc(toNumber(veiculoCadastro.qtd_eixos, Number.NaN))
+      if (!Number.isFinite(qtdEixos) || qtdEixos <= 0) {
+        throw new Error(`Não foi possível resolver qtd_eixos: perfil ${perfilManifesto} possui qtd_eixos inválido no cadastro de veículos`)
+      }
+
+      const kmTotal = toNumber(manifestoRaw.km_total_estimado_m6_2, Number.NaN)
+      const coeficientesCargaGeral = tabelaCargaGeral.filter((item) => item.num_eixos === qtdEixos)
+      let coeficienteFrete = coeficientesCargaGeral[0]
+      if (usarVigencia) {
+        coeficienteFrete = coeficientesCargaGeral.find((item) => {
+          const inicio = new Date(item.vigencia_inicio).getTime()
+          if (!Number.isFinite(inicio) || inicio > dataBaseTs) return false
+          if (!item.vigencia_fim) return true
+          const fim = new Date(item.vigencia_fim).getTime()
+          return Number.isFinite(fim) ? fim >= dataBaseTs : true
+        }) ?? coeficientesCargaGeral[0]
+      }
+
+      if (kmTotal > 0 && qtdEixos > 0 && !coeficienteFrete) {
+        throw new Error(`Tabela de frete mínimo não encontrada para Carga geral, ${qtdEixos} eixos`)
+      }
+
+      const deslocamentoRsKm = toNumber(coeficienteFrete?.coef_ccd, 0)
+      const cargaDescargaRs = toNumber(coeficienteFrete?.coef_cc, 0)
+      const freteMinimo = roundCurrency((kmTotal * deslocamentoRsKm) + cargaDescargaRs)
+
+      if (kmTotal > 0 && qtdEixos > 0 && (!Number.isFinite(freteMinimo) || freteMinimo <= 0)) {
+        throw new Error(`Frete mínimo inválido para manifesto ${manifestoId}: km_total=${kmTotal}, qtd_eixos=${qtdEixos}, deslocamento=${deslocamentoRsKm}, carga_descarga=${cargaDescargaRs}`)
+      }
+      if (index === 0) {
+        console.log('[FRETE MINIMO] exemplo', {
+          manifestoId,
+          perfilManifesto,
+          qtdEixos,
+          kmTotal,
+          deslocamentoRsKm,
+          cargaDescargaRs,
+          freteMinimo,
+        })
+      }
+
       return {
         rodada_id: rodadaId,
         manifesto_id: manifestoId,
-        veiculo_perfil: perfilFinal,
-        veiculo_tipo: perfilFinal,
+        veiculo_perfil: perfilManifesto,
+        veiculo_tipo: perfilManifesto,
+        qtd_eixos: Math.trunc(qtdEixos),
         peso_total: toNumber(manifestoRaw.peso_final_m6_2, Number.NaN),
         ocupacao: toNumber(manifestoRaw.ocupacao_final_m6_2, Number.NaN),
-        km_total: toNumber(manifestoRaw.km_total_estimado_m6_2, Number.NaN),
+        km_total: kmTotal,
         qtd_entregas: Math.trunc(toNumber(manifestoRaw.qtd_itens_final_m6_2, 0)),
         qtd_clientes: Math.trunc(toNumber(manifestoRaw.qtd_paradas_final_m6_2, 0)),
+        frete_minimo: freteMinimo,
         origem_modulo: pickFirstText(manifestoRaw.origem_manifesto_modulo),
         tipo_manifesto: pickFirstText(manifestoRaw.origem_manifesto_tipo),
       }
+    })
+    console.log('[FRETE MINIMO] calculados', {
+      totalManifestos: registrosManifestos.length,
+      comQtdEixos: registrosManifestos.filter((m) => Number(m.qtd_eixos) > 0).length,
+      comFreteMinimo: registrosManifestos.filter((m) => Number(m.frete_minimo) > 0).length,
     })
 
     const registrosItens = itensM7.map((item, index) => {
