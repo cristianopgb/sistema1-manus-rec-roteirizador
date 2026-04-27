@@ -260,6 +260,20 @@ const toText = (value: unknown): string | null => {
   return text.length ? text : null
 }
 
+const extrairMensagemErroRuntime = (erro: unknown): string => {
+  if (erro instanceof Error && erro.message) return erro.message
+  if (typeof erro === 'string') return erro
+  if (erro && typeof erro === 'object') {
+    const maybe = erro as Record<string, unknown>
+    if (typeof maybe.message === 'string' && maybe.message.trim().length > 0) return maybe.message
+  }
+  try {
+    return JSON.stringify(erro)
+  } catch {
+    return String(erro)
+  }
+}
+
 const pickFirstText = (...values: unknown[]): string | null => {
   for (const value of values) {
     const text = toText(value)
@@ -465,8 +479,10 @@ export const roteirizacaoService = {
         uf,
         motivo: motivoTriagem,
         etapa_origem: 'm3_triagem',
-        grupo_remanescente: 'nao_roteirizaveis_m3',
-        payload_apoio_json: item,
+        payload_apoio_json: {
+          ...item,
+          grupo_remanescente: 'nao_roteirizaveis_m3',
+        },
       }
     })
 
@@ -486,21 +502,28 @@ export const roteirizacaoService = {
         uf,
         motivo: extrairMotivoRemanescenteSaldoFinal(item),
         etapa_origem: 'saldo_final_roteirizacao',
-        grupo_remanescente: 'saldo_final_roteirizacao',
-        payload_apoio_json: item,
+        payload_apoio_json: {
+          ...item,
+          grupo_remanescente: 'saldo_final_roteirizacao',
+        },
       }
     })
     const registrosRemanescentes = [...registrosNaoRoteirizaveisM3, ...registrosSaldoFinal]
+    console.log('[PERSISTENCIA] remanescentes preparados:', registrosRemanescentes.length)
     console.log('[PERSISTENCIA M7] remanescentes preparados', {
       saldoFinal: remanescentesM7.saldo_final_roteirizacao.length,
       naoRoteirizaveisM3: remanescentesM7.nao_roteirizaveis_m3.length,
       registrosRemanescentes: registrosRemanescentes.length,
     })
 
-    await supabase.from('manifestos_roteirizacao').delete().eq('rodada_id', rodadaId)
-    await supabase.from('manifestos_itens').delete().eq('rodada_id', rodadaId)
-    await supabase.from('remanescentes_roteirizacao').delete().eq('rodada_id', rodadaId)
-    await supabase.from('estatisticas_roteirizacao').delete().eq('rodada_id', rodadaId)
+    const { error: deleteManifestosError } = await supabase.from('manifestos_roteirizacao').delete().eq('rodada_id', rodadaId)
+    if (deleteManifestosError) throw deleteManifestosError
+    const { error: deleteItensError } = await supabase.from('manifestos_itens').delete().eq('rodada_id', rodadaId)
+    if (deleteItensError) throw deleteItensError
+    const { error: deleteRemanescentesError } = await supabase.from('remanescentes_roteirizacao').delete().eq('rodada_id', rodadaId)
+    if (deleteRemanescentesError) throw deleteRemanescentesError
+    const { error: deleteEstatisticasError } = await supabase.from('estatisticas_roteirizacao').delete().eq('rodada_id', rodadaId)
+    if (deleteEstatisticasError) throw deleteEstatisticasError
 
     if (registrosManifestos.length) {
       const { error } = await supabase.from('manifestos_roteirizacao').insert(registrosManifestos)
@@ -891,7 +914,7 @@ export const roteirizacaoService = {
       statusFinal = mapearStatusMotorParaStatusRodada(resposta.status, false)
     } catch (erro) {
       console.error('[ROTEIRIZACAO] erro no fluxo pós-retorno', erro)
-      erroPosRetorno = erro instanceof Error ? erro.message : 'Erro desconhecido no pós-retorno da roteirização'
+      erroPosRetorno = extrairMensagemErroRuntime(erro)
       statusFinal = 'erro'
     } finally {
       console.log('[ROTEIRIZACAO] status motor recebido:', resposta.status)
