@@ -219,73 +219,193 @@ export function HistoricoPage() {
     return map[status] || 'bg-gray-100 text-gray-700'
   }
 
-  const indicadoresTriagem = useMemo(() => {
-    if (!rodadaSelecionada) return null
-    const resposta = (rodadaSelecionada.resposta_motor ?? {}) as Record<string, unknown>
-    const resumoExecucao = (resposta.resumo_execucao ?? {}) as Record<string, unknown>
-    const resumoNegocio = (resposta.resumo_negocio ?? {}) as Record<string, unknown>
-    const toNum = (value: unknown, fallback = 0) => {
-      const parsed = Number(value)
-      return Number.isFinite(parsed) ? parsed : fallback
-    }
-    const totalCarteira = Math.trunc(toNum(
-      rodadaSelecionada.total_cargas_entrada,
-      toNum((resposta as Record<string, unknown>).total_carteira, toNum(resumoNegocio.total_carteira, toNum(resumoExecucao.total_carteira, 0))),
-    ))
-    const carteiraRoteirizavel = Math.trunc(toNum(
-      resumoNegocio.carteira_roteirizavel,
-      toNum(resumoExecucao.carteira_roteirizavel, totalCarteira),
-    ))
-    const agendasVencidas = Math.trunc(toNum(
-      resumoNegocio.carteira_agendas_vencidas,
-      toNum(resumoExecucao.carteira_agendas_vencidas, Array.isArray(resposta.cargas_agenda_vencida) ? resposta.cargas_agenda_vencida.length : 0),
-    ))
-    const agendamentoFuturo = Math.trunc(toNum(
-      resumoNegocio.carteira_agendamento_futuro,
-      toNum(resumoExecucao.carteira_agendamento_futuro, Array.isArray(resposta.cargas_agendamento_futuro) ? resposta.cargas_agendamento_futuro.length : 0),
-    ))
-    const excecoesTriagem = Math.trunc(toNum(
-      resumoNegocio.carteira_excecoes_triagem,
-      toNum(resumoExecucao.carteira_excecoes_triagem, Array.isArray(resposta.cargas_excecao_triagem) ? resposta.cargas_excecao_triagem.length : 0),
-    ))
-    const itensRoteirizados = estatisticas?.total_roteirizado ?? manifestos.reduce((acc, manifesto) => acc + (manifesto.qtd_entregas || 0), 0)
-    const totalManifestos = estatisticas?.total_manifestos ?? manifestos.length
-    const kmTotal = estatisticas?.km_total ?? manifestos.reduce((acc, manifesto) => acc + (manifesto.km_total || 0), 0)
-    const ocupacaoMedia = estatisticas?.ocupacao_media ?? (manifestos.length ? manifestos.reduce((acc, manifesto) => acc + (manifesto.ocupacao || 0), 0) / manifestos.length : 0)
-    const tempoExecucao = estatisticas?.tempo_execucao_ms ?? rodadaSelecionada.tempo_processamento_ms ?? 0
-    const itensNaoRoteirizados = Math.max(0, carteiraRoteirizavel - itensRoteirizados)
-    const naoAtendidosUniversoTotal = Math.max(0, totalCarteira - itensRoteirizados)
-    const taxaAproveitamento = totalCarteira > 0 ? (itensRoteirizados / totalCarteira) * 100 : 0
-
-    const indicadores = {
-      totalCarteira,
-      carteiraRoteirizavel,
-      itensRoteirizados,
-      itensNaoRoteirizados,
-      totalManifestos,
-      itensPorManifesto: totalManifestos > 0 ? itensRoteirizados / totalManifestos : 0,
-      ocupacaoMedia,
-      kmTotal,
-      kmMedioManifesto: totalManifestos > 0 ? kmTotal / totalManifestos : 0,
-      tempoExecucao,
-      agendasVencidas,
-      agendamentoFuturo,
-      excecoesTriagem,
-      taxaAproveitamento,
-      naoAtendidosUniversoTotal,
-    }
-    console.log('[ESTATISTICAS] indicadores calculados:', indicadores)
-    return indicadores
-  }, [estatisticas, manifestos, rodadaSelecionada])
-
-  const itensAgendados = useMemo(() => (
-    itensManifesto.filter((item) => Boolean(item.inicio_entrega || item.fim_entrega || (item as unknown as Record<string, unknown>).data_agenda))
-  ), [itensManifesto])
-
   const remanescentesNormalizados = useMemo(() => remanescentes.map((item) => ({
     ...item,
     tipo_normalizado: normalizarTipoRemanescente(item),
   })), [remanescentes])
+
+  const estatisticasComposicao = useMemo(() => {
+    if (!rodadaSelecionada) return null
+
+    const respostaMotor = (rodadaSelecionada.resposta_motor ?? {}) as Record<string, unknown>
+    const resumoNegocio = (respostaMotor.resumo_negocio ?? {}) as Record<string, unknown>
+    const resumoExecucao = (respostaMotor.resumo_execucao ?? {}) as Record<string, unknown>
+    const estatisticasRaw = (estatisticas ?? {}) as Record<string, unknown>
+
+    const toNum = (value: unknown): number | null => {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? parsed : null
+    }
+
+    const toInt = (value: unknown): number | null => {
+      const parsed = toNum(value)
+      return parsed === null ? null : Math.max(0, Math.trunc(parsed))
+    }
+
+    const getByPath = (source: Record<string, unknown>, path: string): unknown => (
+      path.split('.').reduce<unknown>((acc, key) => {
+        if (!acc || typeof acc !== 'object' || Array.isArray(acc)) return null
+        return (acc as Record<string, unknown>)[key]
+      }, source)
+    )
+
+    const pickFirstInt = (source: Record<string, unknown>, paths: string[]): number | null => {
+      for (const path of paths) {
+        const value = toInt(getByPath(source, path))
+        if (value !== null) return value
+      }
+      return null
+    }
+
+    const pickFirstArrayLength = (source: Record<string, unknown>, paths: string[]): number | null => {
+      for (const path of paths) {
+        const value = getByPath(source, path)
+        if (Array.isArray(value)) return value.length
+      }
+      return null
+    }
+
+    const possuiTexto = (value: unknown, termos: string[]): boolean => {
+      const texto = String(value ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      return termos.some((termo) => texto.includes(termo))
+    }
+
+    const totalCarteira = Math.max(0, Math.trunc(
+      estatisticas?.total_carteira
+      ?? rodadaSelecionada.total_cargas_entrada
+      ?? pickFirstInt(resumoNegocio, ['total_carteira'])
+      ?? pickFirstInt(resumoExecucao, ['total_carteira'])
+      ?? pickFirstInt(respostaMotor, ['total_carteira'])
+      ?? 0,
+    ))
+
+    const itensRoteirizados = Math.max(0, Math.trunc(
+      estatisticas?.total_roteirizado
+      ?? rodadaSelecionada.total_itens_manifestados
+      ?? manifestos.reduce((acc, manifesto) => acc + (manifesto.qtd_entregas || 0), 0),
+    ))
+
+    const totalManifestos = Math.max(0, Math.trunc(
+      estatisticas?.total_manifestos
+      ?? rodadaSelecionada.total_manifestos
+      ?? manifestos.length,
+    ))
+
+    const ocupacaoMedia = estatisticas?.ocupacao_media
+      ?? rodadaSelecionada.ocupacao_media_percentual
+      ?? (manifestos.length ? manifestos.reduce((acc, manifesto) => acc + (manifesto.ocupacao || 0), 0) / manifestos.length : 0)
+
+    const kmTotal = estatisticas?.km_total
+      ?? rodadaSelecionada.km_total_frota
+      ?? manifestos.reduce((acc, manifesto) => acc + (manifesto.km_total || 0), 0)
+
+    const tempoExecucaoMs = estatisticas?.tempo_execucao_ms
+      ?? rodadaSelecionada.tempo_processamento_ms
+      ?? 0
+
+    const remanescentesNaoRoteirizaveis = remanescentesNormalizados.filter((item) => item.tipo_normalizado === 'nao_roteirizavel_triagem')
+    const saldoFinalRoteirizavelBase = remanescentesNormalizados.filter((item) => item.tipo_normalizado === 'roteirizavel_saldo_final').length
+
+    const agendamentoFuturoBase = remanescentesNaoRoteirizaveis.filter((item) => (
+      possuiTexto(item.etapa_origem, ['agendamento_futuro', 'agenda_futura', 'agenda futura'])
+      || possuiTexto(item.motivo, ['agendamento futuro', 'agenda futura'])
+      || possuiTexto(item.motivo_triagem, ['agendamento futuro', 'agenda futura'])
+      || possuiTexto(item.status_triagem, ['agendamento futuro', 'agenda futura'])
+    )).length
+
+    const aguardandoAgendamentoBase = remanescentesNaoRoteirizaveis.filter((item) => (
+      possuiTexto(item.etapa_origem, ['aguardando_agendamento'])
+      || possuiTexto(item.motivo, ['aguardando agendamento'])
+      || possuiTexto(item.motivo_triagem, ['aguardando agendamento'])
+      || possuiTexto(item.status_triagem, ['aguardando agendamento'])
+    )).length
+
+    const excecoesTriagemBase = remanescentesNaoRoteirizaveis.filter((item) => (
+      possuiTexto(item.etapa_origem, ['excecao_triagem'])
+      || possuiTexto(item.motivo, ['excecao'])
+      || possuiTexto(item.motivo_triagem, ['excecao'])
+      || possuiTexto(item.status_triagem, ['excecao'])
+    )).length
+
+    const naoRoteirizaveisTriagemBase = Math.max(0, remanescentesNaoRoteirizaveis.length - agendamentoFuturoBase - aguardandoAgendamentoBase - excecoesTriagemBase)
+
+    const saldoFinalRoteirizavel = saldoFinalRoteirizavelBase || pickFirstInt(estatisticasRaw, ['saldo_final_roteirizavel'])
+      || pickFirstArrayLength(respostaMotor, [
+        'remanescentes.roteirizavel_saldo_final',
+        'remanescentes.saldo_final_roteirizacao',
+        'remanescentes.roteirizaveis_saldo_final',
+      ])
+      || (estatisticas?.total_remanescente ?? 0)
+
+    const naoRoteirizaveisTriagem = naoRoteirizaveisTriagemBase || pickFirstInt(estatisticasRaw, ['nao_roteirizaveis_triagem'])
+      || pickFirstArrayLength(respostaMotor, ['remanescentes.nao_roteirizaveis_m3'])
+      || 0
+
+    const agendamentoFuturo = agendamentoFuturoBase || pickFirstInt(estatisticasRaw, ['agendamento_futuro'])
+      || pickFirstInt(resumoNegocio, ['agendamento_futuro', 'carteira_agendamento_futuro'])
+      || pickFirstInt(resumoExecucao, ['agendamento_futuro', 'carteira_agendamento_futuro'])
+      || pickFirstArrayLength(respostaMotor, ['cargas_agendamento_futuro', 'remanescentes.agendamento_futuro'])
+      || 0
+
+    const aguardandoAgendamento = aguardandoAgendamentoBase || pickFirstInt(estatisticasRaw, ['aguardando_agendamento'])
+      || pickFirstInt(resumoNegocio, ['aguardando_agendamento', 'carteira_aguardando_agendamento'])
+      || pickFirstInt(resumoExecucao, ['aguardando_agendamento', 'carteira_aguardando_agendamento'])
+      || pickFirstArrayLength(respostaMotor, ['remanescentes.aguardando_agendamento'])
+      || 0
+
+    const excecoesTriagem = excecoesTriagemBase || pickFirstInt(estatisticasRaw, ['excecoes_triagem'])
+      || pickFirstInt(resumoNegocio, ['excecoes_triagem', 'carteira_excecoes_triagem'])
+      || pickFirstInt(resumoExecucao, ['excecoes_triagem', 'carteira_excecoes_triagem'])
+      || pickFirstArrayLength(respostaMotor, ['cargas_excecao_triagem', 'remanescentes.excecoes_triagem'])
+      || 0
+
+    const naoRoteirizadosTotal = Math.max(0, totalCarteira - itensRoteirizados)
+    const classificadosSemOutros = saldoFinalRoteirizavel + naoRoteirizaveisTriagem + agendamentoFuturo + aguardandoAgendamento + excecoesTriagem
+    let outrosNaoClassificados = naoRoteirizadosTotal - classificadosSemOutros
+
+    if (outrosNaoClassificados < 0) {
+      console.warn('[ESTATISTICAS] composição dos não roteirizados excedeu o total', {
+        naoRoteirizadosTotal,
+        saldoFinalRoteirizavel,
+        naoRoteirizaveisTriagem,
+        agendamentoFuturo,
+        aguardandoAgendamento,
+        excecoesTriagem,
+      })
+      outrosNaoClassificados = 0
+    }
+
+    const totalClassificado = itensRoteirizados + saldoFinalRoteirizavel + naoRoteirizaveisTriagem + agendamentoFuturo + aguardandoAgendamento + excecoesTriagem + outrosNaoClassificados
+    const diferencaClassificacao = totalCarteira - totalClassificado
+
+    return {
+      totalCarteira,
+      itensRoteirizados,
+      naoRoteirizadosTotal,
+      saldoFinalRoteirizavel,
+      naoRoteirizaveisTriagem,
+      agendamentoFuturo,
+      aguardandoAgendamento,
+      excecoesTriagem,
+      outrosNaoClassificados,
+      totalManifestos,
+      ocupacaoMedia,
+      kmTotal,
+      kmMedioManifesto: totalManifestos > 0 ? kmTotal / totalManifestos : 0,
+      itensPorManifesto: totalManifestos > 0 ? itensRoteirizados / totalManifestos : 0,
+      tempoExecucaoMs,
+      taxaRoteirizacao: totalCarteira > 0 ? (itensRoteirizados / totalCarteira) * 100 : 0,
+      aproveitamentoUniversoRoteirizavel: (itensRoteirizados + saldoFinalRoteirizavel) > 0
+        ? (itensRoteirizados / (itensRoteirizados + saldoFinalRoteirizavel)) * 100
+        : 0,
+      totalClassificado,
+      diferencaClassificacao,
+    }
+  }, [estatisticas, manifestos, remanescentesNormalizados, rodadaSelecionada])
+
+  const itensAgendados = useMemo(() => (
+    itensManifesto.filter((item) => Boolean(item.inicio_entrega || item.fim_entrega || (item as unknown as Record<string, unknown>).data_agenda))
+  ), [itensManifesto])
 
   const resumoRemanescentes = useMemo(() => {
     const total = remanescentesNormalizados.length
@@ -570,43 +690,55 @@ export function HistoricoPage() {
             </div>
           )}
 
-          {!detalhesLoading && tabAtiva === 'estatisticas' && (
-            <div className="space-y-4">
-              <div className="grid md:grid-cols-4 gap-3 text-sm">
-                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total carteira</div><strong>{estatisticas?.total_carteira ?? 0}</strong></div>
-                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total roteirizado</div><strong>{estatisticas?.total_roteirizado ?? 0}</strong></div>
-                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total remanescente final</div><strong>{estatisticas?.total_remanescente ?? 0}</strong></div>
-                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total manifestos</div><strong>{estatisticas?.total_manifestos ?? 0}</strong></div>
-              </div>
-              <div className="grid md:grid-cols-3 gap-3 text-sm">
-                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Ocupação média</div><strong>{(estatisticas?.ocupacao_media ?? 0).toFixed(1)}%</strong></div>
-                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">KM total</div><strong>{(estatisticas?.km_total ?? 0).toLocaleString('pt-BR')} km</strong></div>
-                <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Tempo de execução</div><strong>{(estatisticas?.tempo_execucao_ms ?? 0).toLocaleString('pt-BR')} ms</strong></div>
-              </div>
-              {indicadoresTriagem && (
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold text-gray-700">Indicadores de triagem e aproveitamento</h4>
-                  <div className="grid md:grid-cols-4 gap-3 text-sm">
-                    <div className="p-3 rounded-lg bg-blue-50"><div className="text-gray-600">Total de Cargas</div><strong>{indicadoresTriagem.totalCarteira}</strong></div>
-                    <div className="p-3 rounded-lg bg-blue-50"><div className="text-gray-600">Cargas Roteirizáveis</div><strong>{indicadoresTriagem.carteiraRoteirizavel}</strong></div>
-                    <div className="p-3 rounded-lg bg-green-50"><div className="text-gray-600">Itens Roteirizados</div><strong>{indicadoresTriagem.itensRoteirizados}</strong></div>
-                    <div className="p-3 rounded-lg bg-amber-50"><div className="text-gray-600">Itens Não Roteirizados</div><strong>{indicadoresTriagem.itensNaoRoteirizados}</strong></div>
-                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">Não Atendidos (Universo Total)</div><strong>{indicadoresTriagem.naoAtendidosUniversoTotal}</strong></div>
-                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">Manifestos Gerados</div><strong>{indicadoresTriagem.totalManifestos}</strong></div>
-                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">Itens por Manifesto</div><strong>{indicadoresTriagem.itensPorManifesto.toFixed(2)}</strong></div>
-                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">Ocupação Média (%)</div><strong>{indicadoresTriagem.ocupacaoMedia.toFixed(1)}%</strong></div>
-                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">KM Total</div><strong>{indicadoresTriagem.kmTotal.toLocaleString('pt-BR')} km</strong></div>
-                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">KM Médio por Manifesto</div><strong>{indicadoresTriagem.kmMedioManifesto.toFixed(2)} km</strong></div>
-                    <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-600">Tempo de Execução (ms)</div><strong>{Math.trunc(indicadoresTriagem.tempoExecucao).toLocaleString('pt-BR')}</strong></div>
-                    <div className="p-3 rounded-lg bg-rose-50"><div className="text-gray-600">Cargas com Agenda Vencida</div><strong>{indicadoresTriagem.agendasVencidas}</strong></div>
-                    <div className="p-3 rounded-lg bg-indigo-50"><div className="text-gray-600">Cargas com Agendamento Futuro</div><strong>{indicadoresTriagem.agendamentoFuturo}</strong></div>
-                    <div className="p-3 rounded-lg bg-red-50"><div className="text-gray-600">Exceções de Triagem</div><strong>{indicadoresTriagem.excecoesTriagem}</strong></div>
-                    <div className="p-3 rounded-lg bg-emerald-50"><div className="text-gray-600">Taxa de Aproveitamento (%)</div><strong>{indicadoresTriagem.taxaAproveitamento.toFixed(1)}%</strong></div>
-                  </div>
+          {!detalhesLoading && tabAtiva === 'estatisticas' && estatisticasComposicao && (
+            <div className="space-y-4 text-sm">
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold text-gray-700">Resumo geral</h4>
+                <div className="grid md:grid-cols-4 gap-3">
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total carteira</div><strong>{estatisticasComposicao.totalCarteira}</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Itens roteirizados</div><strong>{estatisticasComposicao.itensRoteirizados}</strong></div>
+                  <div className="p-3 rounded-lg bg-amber-50"><div className="text-gray-600">Não roteirizados total</div><strong>{estatisticasComposicao.naoRoteirizadosTotal}</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Total manifestos</div><strong>{estatisticasComposicao.totalManifestos}</strong></div>
                 </div>
-              )}
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold text-gray-700">Performance da roteirização</h4>
+                <div className="grid md:grid-cols-4 gap-3">
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Ocupação média</div><strong>{estatisticasComposicao.ocupacaoMedia.toFixed(1)}%</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">KM total</div><strong>{estatisticasComposicao.kmTotal.toLocaleString('pt-BR')} km</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">KM médio por manifesto</div><strong>{estatisticasComposicao.kmMedioManifesto.toFixed(2)} km</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Itens por manifesto</div><strong>{estatisticasComposicao.itensPorManifesto.toFixed(2)}</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Tempo de execução</div><strong>{Math.trunc(estatisticasComposicao.tempoExecucaoMs).toLocaleString('pt-BR')} ms</strong></div>
+                  <div className="p-3 rounded-lg bg-emerald-50"><div className="text-gray-600">Taxa de roteirização</div><strong>{estatisticasComposicao.taxaRoteirizacao.toFixed(1)}%</strong></div>
+                  <div className="p-3 rounded-lg bg-blue-50"><div className="text-gray-600">Aproveitamento do universo roteirizável</div><strong>{estatisticasComposicao.aproveitamentoUniversoRoteirizavel.toFixed(1)}%</strong></div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold text-gray-700">Composição dos não roteirizados</h4>
+                <div className="grid md:grid-cols-4 gap-3">
+                  <div className="p-3 rounded-lg bg-amber-50"><div className="text-gray-600">Não roteirizados total</div><strong>{estatisticasComposicao.naoRoteirizadosTotal}</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Saldo final roteirizável</div><strong>{estatisticasComposicao.saldoFinalRoteirizavel}</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Não roteirizáveis na triagem</div><strong>{estatisticasComposicao.naoRoteirizaveisTriagem}</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Agendamento futuro</div><strong>{estatisticasComposicao.agendamentoFuturo}</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Aguardando agendamento</div><strong>{estatisticasComposicao.aguardandoAgendamento}</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Exceções de triagem</div><strong>{estatisticasComposicao.excecoesTriagem}</strong></div>
+                  <div className="p-3 rounded-lg bg-gray-50"><div className="text-gray-500">Outros não classificados</div><strong>{estatisticasComposicao.outrosNaoClassificados}</strong></div>
+                </div>
+                {estatisticasComposicao.diferencaClassificacao === 0 ? (
+                  <div className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                    Conta fechada
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-700">
+                    Diferença de classificação: {estatisticasComposicao.diferencaClassificacao}
+                  </div>
+                )}
+              </div>
             </div>
           )}
+
         </div>
       )}
 
