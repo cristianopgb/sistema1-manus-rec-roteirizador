@@ -491,12 +491,27 @@ export interface ManifestoItemRoteirizacao {
 export interface RemanescenteRoteirizacao {
   id: string
   rodada_id: string
+  tipo_remanescente: string | null
+  id_linha_pipeline: string | null
   nro_documento: string | null
   destinatario: string | null
   cidade: string | null
   uf: string | null
+  peso_calculado: number | null
+  distancia_rodoviaria_est_km: number | null
+  mesorregiao: string | null
+  subregiao: string | null
+  corredor_30g: string | null
+  corredor_30g_idx: number | null
+  status_triagem: string | null
+  motivo_triagem: string | null
+  motivo_detalhado_m6_2: string | null
+  motivo_final_remanescente_m6_2: string | null
+  motivo_final_remanescente_m5_4: string | null
+  motivo_final_remanescente_m5_3: string | null
   motivo: string | null
   etapa_origem: string | null
+  payload_apoio_json?: Record<string, unknown> | null
   created_at: string
 }
 
