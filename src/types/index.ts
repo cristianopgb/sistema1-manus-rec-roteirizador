@@ -497,8 +497,6 @@ export interface RemanescenteRoteirizacao {
   uf: string | null
   motivo: string | null
   etapa_origem: string | null
-  grupo_remanescente?: string | null
-  payload_apoio_json?: Record<string, unknown> | null
   created_at: string
 }
 
