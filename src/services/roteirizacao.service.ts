@@ -10,7 +10,8 @@ import {
   PayloadMotor, RespostaMotor, ManifestoComFrete,
   RodadaRoteirizacao, FiltrosRoteirizacao, CarteiraCarga,
   Filial, FiltrosCarteira, ConfiguracaoFrotaItem, CarteiraCargaContratoMotor,
-  ManifestoRoteirizacaoDetalhe, ManifestoItemRoteirizacao, RemanescenteRoteirizacao, EstatisticasRoteirizacao
+  ManifestoRoteirizacaoDetalhe, ManifestoItemRoteirizacao, RemanescenteRoteirizacao, EstatisticasRoteirizacao,
+  RotaManifestoGoogle, RotaManifestoParadaGoogle
 } from '@/types'
 import { normalizeHorarioJanela } from '@/lib/time-normalizers'
 import {
@@ -38,6 +39,24 @@ const CAMPOS_DATA_RANGE: Array<{ de: keyof FiltrosCarteira; ate: keyof FiltrosCa
 ]
 
 const MOTOR_2_ROTEIRIZAR_TIMEOUT_MS = 900_000
+const MAX_CONCORRENCIA_ROTAS_GOOGLE = 2
+
+type RotaManifestoGoogleInput = {
+  rodada_id: string
+  manifesto_id: string
+  manifesto_db_id: string | null
+  rota_hash: string
+  origem_latitude: number
+  origem_longitude: number
+  destino_latitude: number | null
+  destino_longitude: number | null
+  paradas_json: RotaManifestoParadaGoogle[]
+  qtd_paradas: number
+  km_estimado_motor: number | null
+  google_status: RotaManifestoGoogle['google_status']
+  google_erro: string | null
+  fonte: string
+}
 
 const normalizarCarteiraItem = (item: any): CarteiraCarga => {
   const { id, upload_id, status_validacao, erro_validacao, created_at, dados_originais_json, ...rest } = item
@@ -266,6 +285,66 @@ const toPayloadNumber = (value: unknown): number | null => {
   }
   const parsed = Number(normalized)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+const roundCoordinate = (value: number): number => Number(value.toFixed(6))
+
+const isValidCoordinate = (latitude: number | null | undefined, longitude: number | null | undefined): boolean => (
+  typeof latitude === 'number'
+  && typeof longitude === 'number'
+  && Number.isFinite(latitude)
+  && Number.isFinite(longitude)
+  && latitude >= -90
+  && latitude <= 90
+  && longitude >= -180
+  && longitude <= 180
+)
+
+const gerarHashRotaGoogle = (
+  origem: { latitude: number; longitude: number },
+  paradas: Array<{ latitude: number; longitude: number }>,
+): string => {
+  const origemNorm = `${roundCoordinate(origem.latitude)},${roundCoordinate(origem.longitude)}`
+  const paradasNorm = paradas.map((p) => `${roundCoordinate(p.latitude)},${roundCoordinate(p.longitude)}`).join('|')
+  const base = `${origemNorm}->${paradasNorm}`
+  let hash = 0
+  for (let i = 0; i < base.length; i += 1) {
+    hash = ((hash << 5) - hash) + base.charCodeAt(i)
+    hash |= 0
+  }
+  return `rg_${Math.abs(hash).toString(16)}_${base.length}`
+}
+
+const consolidarParadasManifesto = (itens: ManifestoItemRoteirizacao[]): RotaManifestoParadaGoogle[] => {
+  const ordenados = [...itens].sort((a, b) => (a.sequencia ?? 0) - (b.sequencia ?? 0))
+  const mapa = new Map<string, RotaManifestoParadaGoogle>()
+  const ordemChaves: string[] = []
+  for (const item of ordenados) {
+    if (!isValidCoordinate(item.latitude, item.longitude)) continue
+    const lat = roundCoordinate(item.latitude as number)
+    const lng = roundCoordinate(item.longitude as number)
+    const cidade = String(item.cidade ?? '').trim().toUpperCase() || null
+    const uf = String(item.uf ?? '').trim().toUpperCase() || null
+    const chave = `${lat}|${lng}|${cidade ?? ''}|${uf ?? ''}`
+    if (!mapa.has(chave)) {
+      mapa.set(chave, {
+        ordem: 0,
+        latitude: Number((item.latitude as number).toFixed(8)),
+        longitude: Number((item.longitude as number).toFixed(8)),
+        cidade,
+        uf,
+        destinatarios: [],
+        documentos: [],
+      })
+      ordemChaves.push(chave)
+    }
+    const parada = mapa.get(chave) as RotaManifestoParadaGoogle
+    const destinatario = String(item.destinatario ?? '').trim()
+    const documento = String(item.nro_documento ?? '').trim()
+    if (destinatario && !parada.destinatarios.includes(destinatario)) parada.destinatarios.push(destinatario)
+    if (documento && !parada.documentos.includes(documento)) parada.documentos.push(documento)
+  }
+  return ordemChaves.map((chave, index) => ({ ...mapa.get(chave) as RotaManifestoParadaGoogle, ordem: index + 1 }))
 }
 
 const isMotor2TimeoutError = (err: unknown): boolean => {
@@ -748,6 +827,8 @@ export const roteirizacaoService = {
     if (deleteItensError) throw deleteItensError
     const { error: deleteManifestosError } = await supabase.from('manifestos_roteirizacao').delete().eq('rodada_id', rodadaId)
     if (deleteManifestosError) throw deleteManifestosError
+    const { error: deleteRotasGoogleError } = await supabase.from('rotas_manifestos_google').delete().eq('rodada_id', rodadaId)
+    if (deleteRotasGoogleError) throw deleteRotasGoogleError
     const { error: deleteRemanescentesError } = await supabase.from('remanescentes_roteirizacao').delete().eq('rodada_id', rodadaId)
     if (deleteRemanescentesError) throw deleteRemanescentesError
     const { error: deleteEstatisticasError } = await supabase.from('estatisticas_roteirizacao').delete().eq('rodada_id', rodadaId)
@@ -1155,6 +1236,11 @@ export const roteirizacaoService = {
       )
 
       await this.persistirEstruturaRodada(rodadaId, resposta, veiculos)
+      try {
+        await this.calcularRotasGoogleRodada(rodadaId)
+      } catch (error) {
+        console.warn('[GOOGLE ROUTES] falha ao calcular rotas da rodada, fluxo principal mantido', error)
+      }
       statusFinal = mapearStatusMotorParaStatusRodada(resposta.status, false)
     } catch (erro) {
       console.error('[ROTEIRIZACAO] erro no fluxo pós-retorno', erro)
@@ -1316,6 +1402,173 @@ export const roteirizacaoService = {
     }
   },
 
+  async montarRotaManifestoGoogle(rodadaId: string, manifestoId: string): Promise<RotaManifestoGoogleInput> {
+    const [manifestoRes, itensRes, rodadaRes] = await Promise.all([
+      supabase
+        .from('manifestos_roteirizacao')
+        .select('id, rodada_id, manifesto_id, km_total')
+        .eq('rodada_id', rodadaId)
+        .eq('manifesto_id', manifestoId)
+        .maybeSingle(),
+      supabase
+        .from('manifestos_itens')
+        .select('id, rodada_id, manifesto_id, sequencia, nro_documento, destinatario, cidade, uf, latitude, longitude')
+        .eq('rodada_id', rodadaId)
+        .eq('manifesto_id', manifestoId),
+      supabase
+        .from('rodadas_roteirizacao')
+        .select('filial_id, filiais:filial_id(latitude, longitude)')
+        .eq('id', rodadaId)
+        .single(),
+    ])
+
+    if (manifestoRes.error) throw manifestoRes.error
+    if (itensRes.error) throw itensRes.error
+    if (rodadaRes.error) throw rodadaRes.error
+    if (!manifestoRes.data) throw new Error(`Manifesto ${manifestoId} não encontrado na rodada`)
+
+    const filialData = rodadaRes.data.filiais as { latitude: number | null; longitude: number | null } | Array<{ latitude: number | null; longitude: number | null }> | null
+    const filial = Array.isArray(filialData) ? (filialData[0] ?? null) : filialData
+    const origemLat = filial?.latitude ?? null
+    const origemLng = filial?.longitude ?? null
+    const itens = (itensRes.data ?? []) as ManifestoItemRoteirizacao[]
+    const paradas = consolidarParadasManifesto(itens)
+    const origemValida = isValidCoordinate(origemLat, origemLng)
+    const statusInicial: RotaManifestoGoogle['google_status'] = !origemValida
+      ? 'sem_coordenadas'
+      : (paradas.length === 0 ? 'sem_paradas' : 'pendente')
+
+    const origemHash = {
+      latitude: origemValida ? origemLat as number : 0,
+      longitude: origemValida ? origemLng as number : 0,
+    }
+    const rotaHash = gerarHashRotaGoogle(origemHash, paradas)
+    const ultimaParada = paradas[paradas.length - 1]
+
+    return {
+      rodada_id: rodadaId,
+      manifesto_id: manifestoId,
+      manifesto_db_id: manifestoRes.data.id,
+      rota_hash: rotaHash,
+      origem_latitude: origemValida ? Number((origemLat as number).toFixed(8)) : 0,
+      origem_longitude: origemValida ? Number((origemLng as number).toFixed(8)) : 0,
+      destino_latitude: ultimaParada?.latitude ?? null,
+      destino_longitude: ultimaParada?.longitude ?? null,
+      paradas_json: paradas,
+      qtd_paradas: paradas.length,
+      km_estimado_motor: manifestoRes.data.km_total ?? null,
+      google_status: statusInicial,
+      google_erro: statusInicial === 'sem_coordenadas'
+        ? 'Filial sem coordenadas válidas'
+        : (statusInicial === 'sem_paradas' ? 'Manifesto sem paradas válidas' : null),
+      fonte: 'google_routes_api',
+    }
+  },
+
+  async salvarOuAtualizarRotaPendente(rota: RotaManifestoGoogleInput): Promise<RotaManifestoGoogle> {
+    const { data: cacheOk } = await supabase
+      .from('rotas_manifestos_google')
+      .select('id, rodada_id, manifesto_id, distancia_metros_google, km_google_maps, duracao_segundos_google, polyline_google, response_json, request_json')
+      .eq('rota_hash', rota.rota_hash)
+      .eq('google_status', 'ok')
+      .neq('rodada_id', rota.rodada_id)
+      .limit(1)
+      .maybeSingle()
+
+    const payload = {
+      ...rota,
+      distancia_metros_google: cacheOk?.distancia_metros_google ?? null,
+      km_google_maps: cacheOk?.km_google_maps ?? null,
+      duracao_segundos_google: cacheOk?.duracao_segundos_google ?? null,
+      polyline_google: cacheOk?.polyline_google ?? null,
+      request_json: cacheOk?.request_json ?? null,
+      response_json: cacheOk?.response_json ?? null,
+      google_status: cacheOk ? 'reutilizada' : rota.google_status,
+      google_erro: cacheOk ? null : rota.google_erro,
+    }
+
+    const { data, error } = await supabase
+      .from('rotas_manifestos_google')
+      .upsert(payload, { onConflict: 'rodada_id,manifesto_id' })
+      .select('*')
+      .single()
+    if (error) throw error
+    return data as RotaManifestoGoogle
+  },
+
+  async calcularRotaGoogleManifesto(rodadaId: string, manifestoId: string): Promise<RotaManifestoGoogle | null> {
+    const rotaMontada = await this.montarRotaManifestoGoogle(rodadaId, manifestoId)
+    const rotaSalva = await this.salvarOuAtualizarRotaPendente(rotaMontada)
+    if (rotaSalva.google_status === 'reutilizada') return rotaSalva
+    if (rotaSalva.google_status === 'sem_coordenadas' || rotaSalva.google_status === 'sem_paradas') return rotaSalva
+
+    const { data, error } = await supabase.functions.invoke('calcular-rota-google', {
+      body: { rodada_id: rodadaId, manifesto_id: manifestoId },
+    })
+
+    if (error) {
+      await supabase
+        .from('rotas_manifestos_google')
+        .update({
+          google_status: 'erro',
+          google_erro: 'Falha ao acionar Edge Function de cálculo de rota',
+        })
+        .eq('rodada_id', rodadaId)
+        .eq('manifesto_id', manifestoId)
+      return null
+    }
+
+    return (data?.rota as RotaManifestoGoogle | undefined) ?? rotaSalva
+  },
+
+  async calcularRotasGoogleRodada(rodadaId: string): Promise<void> {
+    const { data: manifestos, error } = await supabase
+      .from('manifestos_roteirizacao')
+      .select('manifesto_id')
+      .eq('rodada_id', rodadaId)
+      .order('manifesto_id')
+    if (error) throw error
+    const fila = (manifestos ?? []).map((m) => String(m.manifesto_id))
+    for (let i = 0; i < fila.length; i += MAX_CONCORRENCIA_ROTAS_GOOGLE) {
+      const lote = fila.slice(i, i + MAX_CONCORRENCIA_ROTAS_GOOGLE)
+      await Promise.all(lote.map(async (manifestoId) => {
+        try {
+          const rota = await this.calcularRotaGoogleManifesto(rodadaId, manifestoId)
+          console.log('[GOOGLE ROUTES]', {
+            rodada_id: rodadaId,
+            manifesto_id: manifestoId,
+            status: rota?.google_status ?? 'erro',
+            km_google_maps: rota?.km_google_maps ?? null,
+          })
+        } catch (err) {
+          console.warn('[GOOGLE ROUTES] erro por manifesto', { rodada_id: rodadaId, manifesto_id: manifestoId, err })
+        }
+      }))
+    }
+  },
+
+  async buscarRotaManifestoGoogle(rodadaId: string, manifestoId: string): Promise<RotaManifestoGoogle | null> {
+    const { data, error } = await supabase
+      .from('rotas_manifestos_google')
+      .select('*')
+      .eq('rodada_id', rodadaId)
+      .eq('manifesto_id', manifestoId)
+      .maybeSingle()
+    if (error) throw error
+    return (data as RotaManifestoGoogle | null) ?? null
+  },
+
+  async listarRotasManifestosGoogle(rodadaId?: string): Promise<RotaManifestoGoogle[]> {
+    let query = supabase
+      .from('rotas_manifestos_google')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (rodadaId) query = query.eq('rodada_id', rodadaId)
+    const { data, error } = await query
+    if (error) throw error
+    return (data ?? []) as RotaManifestoGoogle[]
+  },
+
   async salvarOrdemManifestoItens(rodadaId: string, manifestoId: string, itens: ManifestoItemRoteirizacao[]): Promise<void> {
     const updates = itens
       .sort((a, b) => a.sequencia - b.sequencia)
@@ -1331,6 +1584,20 @@ export const roteirizacaoService = {
     const resultados = await Promise.all(updates)
     const erro = resultados.find((res) => res.error)?.error
     if (erro) throw erro
+
+    try {
+      await this.calcularRotaGoogleManifesto(rodadaId, manifestoId)
+    } catch (error) {
+      await supabase
+        .from('rotas_manifestos_google')
+        .update({
+          google_status: 'erro',
+          google_erro: 'Falha ao recalcular rota após alteração manual de sequência',
+        })
+        .eq('rodada_id', rodadaId)
+        .eq('manifesto_id', manifestoId)
+      console.warn('[GOOGLE ROUTES] falha ao recalcular após salvar ordem', error)
+    }
   },
 
   async verificarMotor(): Promise<boolean> {

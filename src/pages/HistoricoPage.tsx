@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -8,6 +8,7 @@ import {
   RemanescenteRoteirizacao,
   EstatisticasRoteirizacao,
   ManifestoItemRoteirizacao,
+  RotaManifestoGoogle,
 } from '@/types'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -290,6 +291,7 @@ const juntarValores = (valores: string[], separador = ' / '): string => (valores
 
 export function HistoricoPage() {
   const { isMaster, filialAtiva } = useAuth()
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const rodadaEmFoco = searchParams.get('rodada')
 
@@ -309,6 +311,7 @@ export function HistoricoPage() {
   const [itensOriginais, setItensOriginais] = useState<ManifestoItemRoteirizacao[]>([])
   const [itensManifestosRodada, setItensManifestosRodada] = useState<ManifestoItemRoteirizacao[]>([])
   const [manifestoLoading, setManifestoLoading] = useState(false)
+  const [rotaGoogleManifesto, setRotaGoogleManifesto] = useState<RotaManifestoGoogle | null>(null)
   const [subabaRemanescentes, setSubabaRemanescentes] = useState<TipoRemanescenteTab>('todos')
   const [buscaRemanescentes, setBuscaRemanescentes] = useState('')
   const [filtroTipoRemanescente, setFiltroTipoRemanescente] = useState<'todos' | 'roteirizavel_saldo_final' | 'nao_roteirizavel_triagem'>('todos')
@@ -398,10 +401,15 @@ export function HistoricoPage() {
     setManifestoAtivo(manifesto)
     setModalManifestoAberto(true)
     setManifestoLoading(true)
+    setRotaGoogleManifesto(null)
     try {
-      const data = await roteirizacaoService.buscarManifestoOperacional(rodadaSelecionada.id, manifesto.manifesto_id)
+      const [data, rotaGoogle] = await Promise.all([
+        roteirizacaoService.buscarManifestoOperacional(rodadaSelecionada.id, manifesto.manifesto_id),
+        roteirizacaoService.buscarRotaManifestoGoogle(rodadaSelecionada.id, manifesto.manifesto_id),
+      ])
       setItensManifesto(data.itens)
       setItensOriginais(data.itens)
+      setRotaGoogleManifesto(rotaGoogle)
       console.log('[UI] itens carregados no modal:', data.itens.length)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erro ao carregar entregas do manifesto')
@@ -415,6 +423,7 @@ export function HistoricoPage() {
     setManifestoAtivo(null)
     setItensManifesto([])
     setItensOriginais([])
+    setRotaGoogleManifesto(null)
   }
 
   const rodadaSelecionadaResumo = useMemo(() => {
@@ -446,6 +455,13 @@ export function HistoricoPage() {
   }
 
   const desfazerSequencia = () => setItensManifesto(itensOriginais)
+
+  const formatarDuracaoGoogle = (segundos?: number | null): string => {
+    if (!segundos || segundos <= 0) return '—'
+    const horas = Math.floor(segundos / 3600)
+    const minutos = Math.floor((segundos % 3600) / 60)
+    return `${horas}h ${minutos}min`
+  }
 
   const exportarManifestoPdf = async () => {
     if (!manifestoAtivo || !rodadaSelecionada) return
@@ -1321,6 +1337,24 @@ export function HistoricoPage() {
                   </table>
                 </div>
                 <div className="border border-gray-200 rounded-lg p-3 space-y-3">
+                  <h4 className="text-sm font-semibold text-gray-800">Distância Google Maps</h4>
+                  {!rotaGoogleManifesto ? (
+                    <div className="text-sm text-gray-600">Distância Google Maps: pendente</div>
+                  ) : (
+                    <div className="grid md:grid-cols-3 gap-2 text-xs">
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Status Google</div><div className="font-semibold">{rotaGoogleManifesto.google_status}</div></div>
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">KM Motor</div><div className="font-semibold">{(rotaGoogleManifesto.km_estimado_motor ?? manifestoAtivo.km_total ?? 0).toFixed(2)} km</div></div>
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">KM Google</div><div className="font-semibold">{(rotaGoogleManifesto.km_google_maps ?? 0).toFixed(2)} km</div></div>
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Diferença KM</div><div className="font-semibold">{((rotaGoogleManifesto.km_google_maps ?? 0) - (rotaGoogleManifesto.km_estimado_motor ?? manifestoAtivo.km_total ?? 0)).toFixed(2)} km</div></div>
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Duração estimada</div><div className="font-semibold">{formatarDuracaoGoogle(rotaGoogleManifesto.duracao_segundos_google)}</div></div>
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Fonte</div><div className="font-semibold">{rotaGoogleManifesto.fonte}</div></div>
+                      {rotaGoogleManifesto.google_status === 'erro' && (
+                        <div className="md:col-span-3 bg-red-50 text-red-700 border border-red-200 rounded p-2">
+                          Erro ao calcular rota: {rotaGoogleManifesto.google_erro || 'Falha não detalhada.'}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <h4 className="text-sm font-semibold text-gray-800">Romaneio / Resumo operacional</h4>
                   <div className="grid md:grid-cols-3 gap-2 text-xs">
                     {[
@@ -1386,6 +1420,24 @@ export function HistoricoPage() {
                   <button disabled={itensManifesto.length === 0} onClick={() => void salvarSequencia()} className="px-4 py-2 text-sm rounded-lg bg-brand-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">Salvar ordem</button>
                   <button disabled={itensManifesto.length === 0} onClick={desfazerSequencia} className="px-4 py-2 text-sm rounded-lg bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">Desfazer</button>
                   <button disabled={!manifestoAtivo} onClick={() => void exportarManifestoPdf()} className="px-4 py-2 text-sm rounded-lg bg-purple-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">Exportar PDF</button>
+                  <button
+                    disabled={!rodadaSelecionada || !manifestoAtivo}
+                    onClick={() => navigate(`/rotas?rodada_id=${rodadaSelecionada.id}&manifesto_id=${manifestoAtivo.manifesto_id}`)}
+                    className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Ver rota no mapa
+                  </button>
+                  <button
+                    disabled={!rodadaSelecionada || !manifestoAtivo}
+                    onClick={async () => {
+                      if (!rodadaSelecionada || !manifestoAtivo) return
+                      const rota = await roteirizacaoService.calcularRotaGoogleManifesto(rodadaSelecionada.id, manifestoAtivo.manifesto_id)
+                      setRotaGoogleManifesto(rota)
+                    }}
+                    className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {rotaGoogleManifesto?.google_status === 'erro' ? 'Tentar novamente' : 'Calcular rota Google'}
+                  </button>
                 </div>
               </>
             )}

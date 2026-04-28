@@ -12,6 +12,7 @@ import { VeiculoPage } from '@/pages/cadastros/VeiculoPage'
 import { UsuarioPage } from '@/pages/cadastros/UsuarioPage'
 import { TabelaAnttPage } from '@/pages/cadastros/TabelaAnttPage'
 import { HistoricoPage } from '@/pages/HistoricoPage'
+import { RotasPage } from '@/pages/RotasPage'
 
 function ProtectedRoute({ children, masterOnly = false }: { children: React.ReactNode; masterOnly?: boolean }) {
   const { user, profile, authLoading, profileLoading, profileError, reloadAuthContext } = useAuth()
@@ -119,6 +120,7 @@ function AppRoutes() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="roteirizacao" element={<RoteirizacaoPage />} />
         <Route path="historico" element={<HistoricoPage />} />
+        <Route path="rotas" element={<RotasPage />} />
 
         <Route path="cadastros">
           <Route path="filiais" element={<ProtectedRoute masterOnly><FilialPage /></ProtectedRoute>} />
