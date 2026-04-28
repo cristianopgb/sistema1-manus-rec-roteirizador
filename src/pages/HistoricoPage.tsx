@@ -44,9 +44,9 @@ const textoSeguro = (valor: unknown): string => {
   return txt || '-'
 }
 
-const CAMPOS_EXCLUSIVO = ['veiculo_exclusivo_flag', 'veiculo_exclusivo', 'exclusivo_flag', 'carro_dedicado', 'carro_dedicado_flag', 'exclusivo', 'dedicado']
-const CAMPOS_AGENDAMENTO = ['agendada', 'agenda', 'agendam', 'data_agenda', 'hora_agenda', 'janela', 'inicio_entrega', 'fim_entrega', 'status_agendamento', 'agendamento', 'info_agendamento']
-const CAMPOS_RESTRICAO = ['restricao_veiculo', 'cliente_com_restricao', 'restricao', 'restricoes', 'tem_restricao']
+const CAMPOS_EXCLUSIVO = ['veiculo_exclusivo_flag', 'veiculo_exclusivo', 'exclusivo_flag', 'carro_dedicado', 'carro_dedicado_flag', 'exclusivo', 'dedicado', 'sinalizacao_visual.exclusivo']
+const CAMPOS_AGENDAMENTO = ['agendada', 'agenda', 'agendam', 'data_agenda', 'hora_agenda', 'janela', 'inicio_entrega', 'fim_entrega', 'status_agendamento', 'agendamento', 'info_agendamento', 'sinalizacao_visual.agendada']
+const CAMPOS_RESTRICAO = ['restricao_veiculo', 'cliente_com_restricao', 'restricao', 'restricoes', 'restricao_flag', 'tem_restricao', 'sinalizacao_visual.restricao']
 
 const formatarKm = (valor: number | null | undefined): string => `${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km`
 const formatarMoeda = (valor: number | null | undefined): string => `R$ ${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -110,7 +110,16 @@ type EspecificidadeVisual = 'normal' | 'exclusivo' | 'agendada' | 'restricao' | 
 
 const temCampoVerdadeiro = (registro: Record<string, unknown>, campos: string[]): boolean => {
   const registroExpandido = juntarRegistrosAninhados(registro)
-  return campos.some((campo) => isTruthyFlag(registroExpandido[campo]))
+  return campos.some((campo) => {
+    if (campo.includes('.')) {
+      const valor = campo.split('.').reduce<unknown>((acc, chave) => {
+        if (!acc || typeof acc !== 'object' || Array.isArray(acc)) return undefined
+        return (acc as Record<string, unknown>)[chave]
+      }, registroExpandido)
+      return isTruthyFlag(valor)
+    }
+    return isTruthyFlag(registroExpandido[campo])
+  })
 }
 
 const temTextoIndicativo = (registro: Record<string, unknown>, termos: string[], termosNegativos: string[] = []): boolean => {

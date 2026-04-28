@@ -465,6 +465,7 @@ export interface ManifestoRoteirizacaoDetalhe {
   qtd_entregas: number
   qtd_clientes: number
   frete_minimo: number
+  payload_apoio_json?: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }
@@ -482,6 +483,7 @@ export interface ManifestoItemRoteirizacao {
   distancia_km: number | null
   inicio_entrega: string | null
   fim_entrega: string | null
+  payload_apoio_json?: Record<string, unknown> | null
   latitude: number | null
   longitude: number | null
   created_at: string
