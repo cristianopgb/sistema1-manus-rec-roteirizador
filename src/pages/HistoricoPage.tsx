@@ -16,6 +16,25 @@ import { gerarPdfManifestoOperacional } from '@/services/pdf.service'
 import toast from 'react-hot-toast'
 
 type TipoRemanescenteTab = 'todos' | 'roteirizavel_saldo_final' | 'nao_roteirizavel_triagem'
+type TipoAgendamentoOperacional = 'roteirizado' | 'roteirizavel_nao_atendido' | 'agenda_vencida' | 'agenda_futura'
+type SubabaAgendamentos = 'todos' | TipoAgendamentoOperacional
+
+type AgendamentoOperacional = {
+  tipo: TipoAgendamentoOperacional
+  documento: string
+  cliente: string
+  manifesto_id?: string | null
+  cidade: string
+  uf: string
+  ordem_parada?: number | string | null
+  sequencia?: number | null
+  data_agenda?: string | null
+  hora_agenda?: string | null
+  info_agendamento?: string | null
+  motivo?: string | null
+  status?: string | null
+  peso?: number | null
+}
 
 const normalizarTipoRemanescente = (r: RemanescenteRoteirizacao): 'roteirizavel_saldo_final' | 'nao_roteirizavel_triagem' | 'desconhecido' => {
   if (r.tipo_remanescente === 'roteirizavel_saldo_final' || r.tipo_remanescente === 'nao_roteirizavel_triagem') {
@@ -45,7 +64,7 @@ const textoSeguro = (valor: unknown): string => {
 }
 
 const CAMPOS_EXCLUSIVO = ['veiculo_exclusivo_flag', 'veiculo_exclusivo', 'exclusivo_flag', 'carro_dedicado', 'carro_dedicado_flag', 'exclusivo', 'dedicado', 'sinalizacao_visual.exclusivo']
-const CAMPOS_AGENDAMENTO_DATA = ['data_agenda', 'data_agendamento', 'dt_agendamento', 'data_programada']
+const CAMPOS_AGENDAMENTO_DATA = ['data_agenda', 'data_agendamento', 'dt_agendamento', 'data_programada', 'agendam', 'Agendam.', 'agenda']
 const CAMPOS_RESTRICAO = ['restricao_veiculo', 'cliente_com_restricao', 'restricao', 'restricoes', 'restricao_flag', 'tem_restricao', 'sinalizacao_visual.restricao']
 
 const formatarKm = (valor: number | null | undefined): string => `${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km`
@@ -145,6 +164,58 @@ const temAgendamento = (registro: Record<string, unknown>): boolean => {
   })
 }
 
+const pegarPrimeiroTexto = (registro: Record<string, unknown>, campos: string[]): string | null => {
+  const registroExpandido = juntarRegistrosAninhados(registro)
+  for (const campo of campos) {
+    const valor = campo.split('.').reduce<unknown>((acc, chave) => {
+      if (!acc || typeof acc !== 'object' || Array.isArray(acc)) return undefined
+      return (acc as Record<string, unknown>)[chave]
+    }, registroExpandido)
+    if (temTextoValido(valor)) return String(valor).trim()
+  }
+  return null
+}
+
+const pegarDataAgenda = (registro: Record<string, unknown>): string | null => (
+  pegarPrimeiroTexto(registro, [
+    'payload_apoio_json.data_agenda',
+    'payload_apoio_json.agendam',
+    'payload_apoio_json.Agendam.',
+    'payload_apoio_json.agenda',
+    'inicio_entrega',
+    'data_agenda',
+    'agendam',
+    'Agendam.',
+    'agenda',
+  ])
+)
+
+const pegarHoraAgenda = (registro: Record<string, unknown>): string | null => (
+  pegarPrimeiroTexto(registro, [
+    'payload_apoio_json.hora_agenda',
+    'payload_apoio_json.hora_inicio_entrega',
+    'payload_apoio_json.hora_inicio_janela',
+    'fim_entrega',
+    'inicio_entrega',
+    'hora_agenda',
+    'hora_inicio_entrega',
+    'hora_inicio_janela',
+  ])
+)
+
+const pegarInfoAgenda = (registro: Record<string, unknown>): string | null => (
+  pegarPrimeiroTexto(registro, [
+    'payload_apoio_json.info_agendamento',
+    'payload_apoio_json.janela',
+    'payload_apoio_json.status_agendamento',
+    'info_agendamento',
+    'janela',
+    'status_agendamento',
+    'payload_apoio_json.agenda',
+    'payload_apoio_json.agendam',
+  ])
+)
+
 const obterDataHoraAgendamento = (item: ManifestoItemRoteirizacao): { data: string; hora: string; info: string } => {
   const row = juntarRegistrosAninhados(item as unknown as Record<string, unknown>)
   const dataBase = [
@@ -224,7 +295,7 @@ export function HistoricoPage() {
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
   const [rodadaSelecionada, setRodadaSelecionada] = useState<RodadaRoteirizacao | null>(null)
-  const [tabAtiva, setTabAtiva] = useState<'manifestos' | 'remanescentes' | 'estatisticas'>('manifestos')
+  const [tabAtiva, setTabAtiva] = useState<'manifestos' | 'remanescentes' | 'agendamentos' | 'estatisticas'>('manifestos')
   const [manifestos, setManifestos] = useState<ManifestoRoteirizacaoDetalhe[]>([])
   const [remanescentes, setRemanescentes] = useState<RemanescenteRoteirizacao[]>([])
   const [estatisticas, setEstatisticas] = useState<EstatisticasRoteirizacao | null>(null)
@@ -234,6 +305,7 @@ export function HistoricoPage() {
   const [modalManifestoAberto, setModalManifestoAberto] = useState(false)
   const [itensManifesto, setItensManifesto] = useState<ManifestoItemRoteirizacao[]>([])
   const [itensOriginais, setItensOriginais] = useState<ManifestoItemRoteirizacao[]>([])
+  const [itensManifestosRodada, setItensManifestosRodada] = useState<ManifestoItemRoteirizacao[]>([])
   const [manifestoLoading, setManifestoLoading] = useState(false)
   const [subabaRemanescentes, setSubabaRemanescentes] = useState<TipoRemanescenteTab>('todos')
   const [buscaRemanescentes, setBuscaRemanescentes] = useState('')
@@ -241,6 +313,11 @@ export function HistoricoPage() {
   const [filtroMesorregiao, setFiltroMesorregiao] = useState('todos')
   const [filtroSubregiao, setFiltroSubregiao] = useState('todos')
   const [filtroMotivo, setFiltroMotivo] = useState('todos')
+  const [subabaAgendamentos, setSubabaAgendamentos] = useState<SubabaAgendamentos>('todos')
+  const [buscaAgendamentos, setBuscaAgendamentos] = useState('')
+  const [filtroTipoAgendamento, setFiltroTipoAgendamento] = useState<'todos' | TipoAgendamentoOperacional>('todos')
+  const [filtroManifestoAgendamento, setFiltroManifestoAgendamento] = useState('todos')
+  const [filtroCidadeAgendamento, setFiltroCidadeAgendamento] = useState('todos')
 
   useEffect(() => {
     const fetchRodadas = async () => {
@@ -276,17 +353,27 @@ export function HistoricoPage() {
     setManifestoAtivo(null)
     setModalManifestoAberto(false)
     setItensManifesto([])
+    setItensManifestosRodada([])
     try {
-      const detalhes = await roteirizacaoService.buscarDetalhesAprovacao(rodada.id)
+      const [detalhes, itensRodada] = await Promise.all([
+        roteirizacaoService.buscarDetalhesAprovacao(rodada.id),
+        roteirizacaoService.buscarItensManifestosRodada(rodada.id),
+      ])
       setManifestos(detalhes.manifestos)
       setRemanescentes(detalhes.remanescentes)
       setEstatisticas(detalhes.estatisticas)
+      setItensManifestosRodada(itensRodada)
       setSubabaRemanescentes('todos')
       setBuscaRemanescentes('')
       setFiltroTipoRemanescente('todos')
       setFiltroMesorregiao('todos')
       setFiltroSubregiao('todos')
       setFiltroMotivo('todos')
+      setSubabaAgendamentos('todos')
+      setBuscaAgendamentos('')
+      setFiltroTipoAgendamento('todos')
+      setFiltroManifestoAgendamento('todos')
+      setFiltroCidadeAgendamento('todos')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erro ao carregar detalhes da rodada')
     } finally {
@@ -681,6 +768,112 @@ export function HistoricoPage() {
       })
   }, [buscaRemanescentes, filtroMesorregiao, filtroMotivo, filtroSubregiao, filtroTipoRemanescente, remanescentesNormalizados, subabaRemanescentes])
 
+  const registrosAgendamentos = useMemo<AgendamentoOperacional[]>(() => {
+    const resultado: AgendamentoOperacional[] = []
+    const textosAgendaVencida = ['agenda_vencida', 'agenda vencida', 'vencida']
+    const textosAgendaFutura = ['agendamento_futuro', 'agenda_futura', 'agenda futura', 'futura']
+
+    itensManifestosRodada.forEach((item) => {
+      const expandido = juntarRegistrosAninhados(item as unknown as Record<string, unknown>)
+      if (!temAgendamento(expandido)) return
+      resultado.push({
+        tipo: 'roteirizado',
+        documento: textoSeguro(item.nro_documento),
+        cliente: textoSeguro(item.destinatario),
+        manifesto_id: item.manifesto_id,
+        cidade: textoSeguro(item.cidade),
+        uf: textoSeguro(item.uf),
+        ordem_parada: (expandido.ordem_parada_m7 ?? expandido.ordem_entrega_parada_m7 ?? null) as number | string | null,
+        sequencia: item.sequencia ?? null,
+        data_agenda: pegarDataAgenda(expandido),
+        hora_agenda: pegarHoraAgenda(expandido),
+        info_agendamento: pegarInfoAgenda(expandido),
+        peso: item.peso ?? null,
+      })
+    })
+
+    remanescentes.forEach((remanescente) => {
+      const expandido = juntarRegistrosAninhados(remanescente as unknown as Record<string, unknown>)
+      const textos = coletarTextosRegistro(expandido)
+      const temVencida = textos.some((texto) => textosAgendaVencida.some((termo) => texto.includes(termo)))
+        || normalizarTextoBusca(expandido.status_folga) === 'vencida'
+      const temFutura = textos.some((texto) => textosAgendaFutura.some((termo) => texto.includes(termo)))
+      const tipoNormalizado = normalizarTipoRemanescente(remanescente)
+      const ehRoteirizavelSemAtendimento = (
+        (remanescente.tipo_remanescente === 'roteirizavel_saldo_final' || remanescente.etapa_origem === 'saldo_final_roteirizacao' || tipoNormalizado === 'roteirizavel_saldo_final')
+        && temAgendamento(expandido)
+      )
+
+      let tipo: TipoAgendamentoOperacional | null = null
+      if (temVencida) tipo = 'agenda_vencida'
+      else if (temFutura) tipo = 'agenda_futura'
+      else if (ehRoteirizavelSemAtendimento) tipo = 'roteirizavel_nao_atendido'
+      if (!tipo) return
+
+      resultado.push({
+        tipo,
+        documento: textoSeguro(remanescente.nro_documento),
+        cliente: textoSeguro(remanescente.destinatario),
+        cidade: textoSeguro(remanescente.cidade),
+        uf: textoSeguro(remanescente.uf),
+        data_agenda: pegarDataAgenda(expandido),
+        hora_agenda: pegarHoraAgenda(expandido),
+        info_agendamento: pegarInfoAgenda(expandido),
+        motivo: textoSeguro(remanescente.motivo !== '-' ? remanescente.motivo : remanescente.motivo_triagem),
+        status: textoSeguro(remanescente.status_triagem),
+        peso: remanescente.peso_calculado ?? null,
+      })
+    })
+
+    const pontuarCompletude = (item: AgendamentoOperacional): number => (
+      [item.cliente, item.cidade, item.uf, item.data_agenda, item.hora_agenda, item.info_agendamento, item.motivo, item.status, item.manifesto_id, item.ordem_parada, item.sequencia, item.peso]
+        .filter((valor) => temTextoValido(valor) || typeof valor === 'number')
+        .length
+    )
+
+    const deduplicado = new Map<string, AgendamentoOperacional>()
+    resultado.forEach((item) => {
+      const chave = item.tipo === 'roteirizado' ? `${item.tipo}|${item.documento}|${item.manifesto_id ?? '-'}` : `${item.tipo}|${item.documento}`
+      const atual = deduplicado.get(chave)
+      if (!atual || pontuarCompletude(item) > pontuarCompletude(atual)) deduplicado.set(chave, item)
+    })
+    return Array.from(deduplicado.values())
+  }, [itensManifestosRodada, remanescentes])
+
+  const resumoAgendamentos = useMemo(() => {
+    const total = registrosAgendamentos.length
+    const roteirizados = registrosAgendamentos.filter((item) => item.tipo === 'roteirizado').length
+    const roteirizaveisNaoAtendidos = registrosAgendamentos.filter((item) => item.tipo === 'roteirizavel_nao_atendido').length
+    const agendaVencida = registrosAgendamentos.filter((item) => item.tipo === 'agenda_vencida').length
+    const agendaFutura = registrosAgendamentos.filter((item) => item.tipo === 'agenda_futura').length
+    const percentualRoteirizado = total > 0 ? (roteirizados / total) * 100 : 0
+    return { total, roteirizados, roteirizaveisNaoAtendidos, agendaVencida, agendaFutura, percentualRoteirizado }
+  }, [registrosAgendamentos])
+
+  const opcoesManifestoAgendamento = useMemo(
+    () => Array.from(new Set(registrosAgendamentos.map((item) => textoSeguro(item.manifesto_id)).filter((valor) => valor !== '-'))).sort(),
+    [registrosAgendamentos],
+  )
+
+  const opcoesCidadeAgendamento = useMemo(
+    () => Array.from(new Set(registrosAgendamentos.map((item) => formatarCidadeUf(item.cidade, item.uf)).filter((valor) => valor !== '-'))).sort(),
+    [registrosAgendamentos],
+  )
+
+  const agendamentosFiltrados = useMemo(() => {
+    const termo = normalizarTextoBusca(buscaAgendamentos)
+    return registrosAgendamentos
+      .filter((item) => subabaAgendamentos === 'todos' || item.tipo === subabaAgendamentos)
+      .filter((item) => filtroTipoAgendamento === 'todos' || item.tipo === filtroTipoAgendamento)
+      .filter((item) => filtroManifestoAgendamento === 'todos' || textoSeguro(item.manifesto_id) === filtroManifestoAgendamento)
+      .filter((item) => filtroCidadeAgendamento === 'todos' || formatarCidadeUf(item.cidade, item.uf) === filtroCidadeAgendamento)
+      .filter((item) => {
+        if (!termo) return true
+        const indexavel = `${item.documento} ${item.cliente} ${item.cidade}`
+        return normalizarTextoBusca(indexavel).includes(termo)
+      })
+  }, [buscaAgendamentos, filtroCidadeAgendamento, filtroManifestoAgendamento, filtroTipoAgendamento, registrosAgendamentos, subabaAgendamentos])
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -755,6 +948,7 @@ export function HistoricoPage() {
             {[
               { key: 'manifestos', label: `Manifestos (${manifestos.length})` },
               { key: 'remanescentes', label: `Remanescentes (${remanescentes.length})` },
+              { key: 'agendamentos', label: `Agendamentos (${resumoAgendamentos.total})` },
               { key: 'estatisticas', label: 'Estatísticas' },
             ].map((tab) => (
               <button key={tab.key} className={`px-3 py-2 rounded-lg text-sm ${tabAtiva === tab.key ? 'bg-brand-100 text-brand-800' : 'bg-gray-100 text-gray-700'}`} onClick={() => setTabAtiva(tab.key as typeof tabAtiva)}>{tab.label}</button>
@@ -920,6 +1114,103 @@ export function HistoricoPage() {
                       <tr>
                         <td className="px-2 py-2 text-gray-400" colSpan={subabaRemanescentes === 'todos' ? 10 : subabaRemanescentes === 'roteirizavel_saldo_final' ? 15 : 10}>
                           Sem remanescentes para os filtros selecionados.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {!detalhesLoading && tabAtiva === 'agendamentos' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2">
+                <div className="p-3 rounded-lg bg-gray-50 text-xs"><div className="text-gray-500">Total agendamentos</div><strong>{resumoAgendamentos.total}</strong></div>
+                <div className="p-3 rounded-lg bg-green-50 text-xs"><div className="text-gray-500">Roteirizados</div><strong>{resumoAgendamentos.roteirizados}</strong></div>
+                <div className="p-3 rounded-lg bg-blue-50 text-xs"><div className="text-gray-500">Roteirizáveis não atendidos</div><strong>{resumoAgendamentos.roteirizaveisNaoAtendidos}</strong></div>
+                <div className="p-3 rounded-lg bg-red-50 text-xs"><div className="text-gray-500">Agenda vencida</div><strong>{resumoAgendamentos.agendaVencida}</strong></div>
+                <div className="p-3 rounded-lg bg-yellow-50 text-xs"><div className="text-gray-500">Agenda futura</div><strong>{resumoAgendamentos.agendaFutura}</strong></div>
+                <div className="p-3 rounded-lg bg-gray-50 text-xs"><div className="text-gray-500">% roteirizado</div><strong>{resumoAgendamentos.percentualRoteirizado.toFixed(1)}%</strong></div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { key: 'todos', label: `Todos (${resumoAgendamentos.total})` },
+                  { key: 'roteirizado', label: `Roteirizados (${resumoAgendamentos.roteirizados})` },
+                  { key: 'roteirizavel_nao_atendido', label: `Roteirizáveis não atendidos (${resumoAgendamentos.roteirizaveisNaoAtendidos})` },
+                  { key: 'agenda_vencida', label: `Agenda vencida (${resumoAgendamentos.agendaVencida})` },
+                  { key: 'agenda_futura', label: `Agenda futura (${resumoAgendamentos.agendaFutura})` },
+                ].map((aba) => (
+                  <button
+                    key={aba.key}
+                    className={`px-3 py-1.5 rounded-lg text-xs ${subabaAgendamentos === aba.key ? 'bg-brand-100 text-brand-800' : 'bg-gray-100 text-gray-700'}`}
+                    onClick={() => setSubabaAgendamentos(aba.key as SubabaAgendamentos)}
+                  >
+                    {aba.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 text-xs">
+                <input className="input text-xs h-9" placeholder="Buscar documento, cliente ou cidade" value={buscaAgendamentos} onChange={(e) => setBuscaAgendamentos(e.target.value)} />
+                <select className="input text-xs h-9" value={filtroTipoAgendamento} onChange={(e) => setFiltroTipoAgendamento(e.target.value as typeof filtroTipoAgendamento)}>
+                  <option value="todos">Tipo: Todos</option>
+                  <option value="roteirizado">Roteirizado</option>
+                  <option value="roteirizavel_nao_atendido">Roteirizável não atendido</option>
+                  <option value="agenda_vencida">Agenda vencida</option>
+                  <option value="agenda_futura">Agenda futura</option>
+                </select>
+                <select className="input text-xs h-9" value={filtroManifestoAgendamento} onChange={(e) => setFiltroManifestoAgendamento(e.target.value)}>
+                  <option value="todos">Manifesto: Todos</option>
+                  {opcoesManifestoAgendamento.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+                <select className="input text-xs h-9" value={filtroCidadeAgendamento} onChange={(e) => setFiltroCidadeAgendamento(e.target.value)}>
+                  <option value="todos">Cidade/UF: Todas</option>
+                  {opcoesCidadeAgendamento.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </div>
+
+              <div className="max-h-[520px] overflow-y-auto overflow-x-auto rounded-lg border">
+                <table className="min-w-[1300px] text-xs w-full">
+                  <thead>
+                    <tr className="text-left border-b sticky top-0 z-10 bg-white">
+                      {['Tipo', 'Documento', 'Cliente', 'Manifesto', 'Cidade/UF', 'Ordem parada', 'Sequência', 'Data agenda', 'Hora', 'Motivo / Info'].map((h) => <th key={h} className="px-2 py-1.5">{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {agendamentosFiltrados.map((item, index) => {
+                      const badgeTipo: Record<TipoAgendamentoOperacional, string> = {
+                        roteirizado: 'bg-green-100 text-green-700',
+                        roteirizavel_nao_atendido: 'bg-blue-100 text-blue-700',
+                        agenda_vencida: 'bg-red-100 text-red-700',
+                        agenda_futura: 'bg-yellow-100 text-yellow-700',
+                      }
+                      const legendaTipo: Record<TipoAgendamentoOperacional, string> = {
+                        roteirizado: 'Roteirizado',
+                        roteirizavel_nao_atendido: 'Roteirizável não atendido',
+                        agenda_vencida: 'Agenda vencida',
+                        agenda_futura: 'Agenda futura',
+                      }
+                      return (
+                        <tr key={`${item.tipo}-${item.documento}-${item.manifesto_id ?? '-'}-${index}`} className="border-b">
+                          <td className="px-2 py-1.5"><span className={`px-2 py-0.5 rounded-full text-[10px] ${badgeTipo[item.tipo]}`}>{legendaTipo[item.tipo]}</span></td>
+                          <td className="px-2 py-1.5">{textoSeguro(item.documento)}</td>
+                          <td className="px-2 py-1.5 max-w-[220px] truncate" title={textoSeguro(item.cliente)}>{textoSeguro(item.cliente)}</td>
+                          <td className="px-2 py-1.5">{textoSeguro(item.manifesto_id)}</td>
+                          <td className="px-2 py-1.5">{formatarCidadeUf(item.cidade, item.uf)}</td>
+                          <td className="px-2 py-1.5">{textoSeguro(item.ordem_parada)}</td>
+                          <td className="px-2 py-1.5">{textoSeguro(item.sequencia)}</td>
+                          <td className="px-2 py-1.5">{formatarData(item.data_agenda)}</td>
+                          <td className="px-2 py-1.5">{temTextoValido(item.hora_agenda) ? item.hora_agenda : '—'}</td>
+                          <td className="px-2 py-1.5 max-w-[260px] truncate" title={textoSeguro(item.motivo || item.info_agendamento)}>{textoSeguro(item.motivo || item.info_agendamento)}</td>
+                        </tr>
+                      )
+                    })}
+                    {agendamentosFiltrados.length === 0 && (
+                      <tr>
+                        <td className="px-2 py-2 text-gray-400" colSpan={10}>
+                          Sem agendamentos para os filtros selecionados.
                         </td>
                       </tr>
                     )}

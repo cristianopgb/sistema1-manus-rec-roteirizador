@@ -1255,7 +1255,7 @@ export const roteirizacaoService = {
       supabase.from('manifestos_roteirizacao').select('*').eq('rodada_id', rodadaId).order('manifesto_id'),
       supabase
         .from('remanescentes_roteirizacao')
-        .select('id, rodada_id, tipo_remanescente, id_linha_pipeline, nro_documento, destinatario, cidade, uf, peso_calculado, distancia_rodoviaria_est_km, mesorregiao, subregiao, corredor_30g, corredor_30g_idx, status_triagem, motivo_triagem, motivo_detalhado_m6_2, motivo_final_remanescente_m6_2, motivo_final_remanescente_m5_4, motivo_final_remanescente_m5_3, motivo, etapa_origem, created_at')
+        .select('id, rodada_id, tipo_remanescente, id_linha_pipeline, nro_documento, destinatario, cidade, uf, peso_calculado, distancia_rodoviaria_est_km, mesorregiao, subregiao, corredor_30g, corredor_30g_idx, status_triagem, motivo_triagem, motivo_detalhado_m6_2, motivo_final_remanescente_m6_2, motivo_final_remanescente_m5_4, motivo_final_remanescente_m5_3, motivo, etapa_origem, payload_apoio_json, created_at')
         .eq('rodada_id', rodadaId)
         .order('created_at'),
       supabase.from('estatisticas_roteirizacao').select('*').eq('rodada_id', rodadaId).maybeSingle(),
@@ -1270,6 +1270,18 @@ export const roteirizacaoService = {
       remanescentes: (remanescentesRes.data ?? []) as RemanescenteRoteirizacao[],
       estatisticas: (estatisticasRes.data as EstatisticasRoteirizacao | null) ?? null,
     }
+  },
+
+  async buscarItensManifestosRodada(rodadaId: string): Promise<ManifestoItemRoteirizacao[]> {
+    const { data, error } = await supabase
+      .from('manifestos_itens')
+      .select('id, rodada_id, manifesto_id, sequencia, nro_documento, destinatario, cidade, uf, peso, distancia_km, inicio_entrega, fim_entrega, payload_apoio_json, latitude, longitude, created_at, updated_at')
+      .eq('rodada_id', rodadaId)
+      .order('manifesto_id')
+      .order('sequencia')
+
+    if (error) throw error
+    return (data ?? []) as ManifestoItemRoteirizacao[]
   },
 
   async buscarManifestoOperacional(rodadaId: string, manifestoId: string): Promise<{
