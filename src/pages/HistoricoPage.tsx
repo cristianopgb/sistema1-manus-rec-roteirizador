@@ -44,9 +44,17 @@ const textoSeguro = (valor: unknown): string => {
   return txt || '-'
 }
 
-const CAMPOS_EXCLUSIVO = ['veiculo_exclusivo_flag', 'veiculo_exclusivo', 'exclusivo_flag', 'carro_dedicado', 'carro_dedicado_flag', 'exclusivo', 'dedicado']
-const CAMPOS_AGENDAMENTO = ['agendada', 'agenda', 'agendam', 'data_agenda', 'hora_agenda', 'janela', 'inicio_entrega', 'fim_entrega', 'status_agendamento', 'agendamento', 'info_agendamento']
-const CAMPOS_RESTRICAO = ['restricao_veiculo', 'cliente_com_restricao', 'restricao', 'restricoes', 'tem_restricao']
+const textoOperacionalValido = (valor: unknown): string | null => {
+  const txt = String(valor ?? '').trim()
+  if (!txt) return null
+  const normalizado = txt.toLowerCase()
+  if (['nat', 'nan', 'null', 'undefined', '-', '—', 'sem agenda', 'sem agendamento'].includes(normalizado)) return null
+  return txt
+}
+
+const CAMPOS_EXCLUSIVO = ['veiculo_exclusivo_flag', 'veiculo_exclusivo', 'exclusivo_flag', 'carro_dedicado', 'carro_dedicado_flag', 'exclusivo', 'dedicado', 'sinalizacao_visual.exclusivo']
+const CAMPOS_AGENDAMENTO = ['agendada', 'agenda', 'agendam', 'data_agenda', 'hora_agenda', 'janela', 'inicio_entrega', 'fim_entrega', 'status_agendamento', 'agendamento', 'info_agendamento', 'sinalizacao_visual.agendada']
+const CAMPOS_RESTRICAO = ['restricao_veiculo', 'cliente_com_restricao', 'restricao', 'restricoes', 'restricao_flag', 'tem_restricao', 'sinalizacao_visual.restricao']
 
 const formatarKm = (valor: number | null | undefined): string => `${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km`
 const formatarMoeda = (valor: number | null | undefined): string => `R$ ${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -110,7 +118,16 @@ type EspecificidadeVisual = 'normal' | 'exclusivo' | 'agendada' | 'restricao' | 
 
 const temCampoVerdadeiro = (registro: Record<string, unknown>, campos: string[]): boolean => {
   const registroExpandido = juntarRegistrosAninhados(registro)
-  return campos.some((campo) => isTruthyFlag(registroExpandido[campo]))
+  return campos.some((campo) => {
+    if (campo.includes('.')) {
+      const valor = campo.split('.').reduce<unknown>((acc, chave) => {
+        if (!acc || typeof acc !== 'object' || Array.isArray(acc)) return undefined
+        return (acc as Record<string, unknown>)[chave]
+      }, registroExpandido)
+      return isTruthyFlag(valor)
+    }
+    return isTruthyFlag(registroExpandido[campo])
+  })
 }
 
 const temTextoIndicativo = (registro: Record<string, unknown>, termos: string[], termosNegativos: string[] = []): boolean => {
@@ -128,8 +145,39 @@ const temAgendamento = (registro: Record<string, unknown>): boolean => {
   if (temCampoVerdadeiro(registroExpandido, CAMPOS_AGENDAMENTO)) return true
   return CAMPOS_AGENDAMENTO.some((campo) => {
     const valor = registroExpandido[campo]
-    return typeof valor === 'string' && valor.trim().length > 0
+    return !!textoOperacionalValido(valor)
   }) || temTextoIndicativo(registroExpandido, ['agendad', 'agenda', 'janela'], ['sem agenda', 'nao agend'])
+}
+
+const extrairDataHoraAgendamento = (item: ManifestoItemRoteirizacao): { data: string; hora: string } => {
+  const extra = item as unknown as Record<string, unknown>
+  const apoio = (extra.payload_apoio_json && typeof extra.payload_apoio_json === 'object' && !Array.isArray(extra.payload_apoio_json))
+    ? extra.payload_apoio_json as Record<string, unknown>
+    : {}
+  const dataRaw = textoOperacionalValido(apoio.data_agenda) ?? textoOperacionalValido(extra.data_agenda) ?? textoOperacionalValido(item.inicio_entrega)
+  const horaRaw = textoOperacionalValido(apoio.hora_agenda)
+    ?? textoOperacionalValido(apoio.hora_inicio_entrega)
+    ?? textoOperacionalValido(apoio.hora_inicio_janela)
+    ?? textoOperacionalValido(item.fim_entrega)
+
+  return {
+    data: dataRaw ? formatarData(dataRaw) : '—',
+    hora: horaRaw ?? '—',
+  }
+}
+
+const legendaEspecificidade = (item: ManifestoItemRoteirizacao, especificidade: EspecificidadeVisual): string => {
+  if (especificidade !== 'restricao' && especificidade !== 'multipla') return estiloEspecificidade[especificidade].legenda
+  const extra = item as unknown as Record<string, unknown>
+  const apoio = (extra.payload_apoio_json && typeof extra.payload_apoio_json === 'object' && !Array.isArray(extra.payload_apoio_json))
+    ? extra.payload_apoio_json as Record<string, unknown>
+    : {}
+  const restricaoVeiculo = Boolean(apoio.restricao_veiculo ?? apoio.tem_restricao_veiculo ?? apoio.restricao_flag)
+  const clienteRestricao = Boolean(apoio.cliente_com_restricao ?? apoio.restricao_cliente)
+  if (restricaoVeiculo && clienteRestricao) return especificidade === 'multipla' ? 'Múltiplas (restr. veículo/cliente)' : 'Restrição veículo/cliente'
+  if (restricaoVeiculo) return especificidade === 'multipla' ? 'Múltiplas (restr. veículo)' : 'Restrição de veículo'
+  if (clienteRestricao) return especificidade === 'multipla' ? 'Múltiplas (restr. cliente)' : 'Restrição de cliente'
+  return estiloEspecificidade[especificidade].legenda
 }
 
 const obterEspecificidadeVisual = (registro: Record<string, unknown>): EspecificidadeVisual => {
@@ -972,7 +1020,7 @@ export function HistoricoPage() {
                         <tr key={item.id} className={`border-b ${estiloEspecificidade[especificidade].fundo}`}>
                           <td className="py-2">
                             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${estiloEspecificidade[especificidade].badge}`}>
-                              {estiloEspecificidade[especificidade].legenda}
+                              {legendaEspecificidade(item, especificidade)}
                             </span>
                           </td>
                           <td className="py-2">{item.sequencia}</td>
@@ -981,7 +1029,7 @@ export function HistoricoPage() {
                           <td>{item.cidade || '—'}</td>
                           <td>{item.uf || '—'}</td>
                           <td>{item.peso != null ? `${formatarPeso(item.peso)} kg` : '—'}</td>
-                          <td>{item.inicio_entrega || '—'}{item.fim_entrega ? ` - ${item.fim_entrega}` : ''}</td>
+                          <td>{textoOperacionalValido(item.inicio_entrega) || '—'}{textoOperacionalValido(item.fim_entrega) ? ` - ${textoOperacionalValido(item.fim_entrega)}` : ''}</td>
                           <td className="space-x-2"><button onClick={() => alterarSequencia(index, -1)} className="px-2 py-1 bg-gray-100 rounded">↑</button><button onClick={() => alterarSequencia(index, 1)} className="px-2 py-1 bg-gray-100 rounded">↓</button></td>
                         </tr>
                       ))}
@@ -1032,16 +1080,16 @@ export function HistoricoPage() {
                         </thead>
                         <tbody>
                           {itensAgendados.map((item) => {
-                            const extra = item as unknown as Record<string, unknown>
+                            const agendamento = extrairDataHoraAgendamento(item)
                             return (
                               <tr key={`ag-${item.id}`} className="border-b border-amber-200">
                                 <td className="py-1">{item.nro_documento || '—'}</td>
                                 <td>{item.destinatario || '—'}</td>
                                 <td>{item.cidade || '—'}</td>
                                 <td>{item.uf || '—'}</td>
-                                <td>{formatarData(extra.data_agenda ?? item.inicio_entrega)}</td>
-                                <td>{item.fim_entrega || item.inicio_entrega || '—'}</td>
-                                <td>{`Agendamento para ${formatarData(extra.data_agenda ?? item.inicio_entrega)}${(item.fim_entrega || item.inicio_entrega) ? ` - ${item.fim_entrega || item.inicio_entrega}` : ''}`}</td>
+                                <td>{agendamento.data}</td>
+                                <td>{agendamento.hora}</td>
+                                <td>{`Agendamento para ${agendamento.data}${agendamento.hora !== '—' ? ` - ${agendamento.hora}` : ''}`}</td>
                               </tr>
                             )
                           })}
