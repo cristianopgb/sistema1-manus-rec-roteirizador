@@ -44,9 +44,9 @@ const textoSeguro = (valor: unknown): string => {
   return txt || '-'
 }
 
-const CAMPOS_EXCLUSIVO = ['veiculo_exclusivo_flag', 'exclusivo_flag', 'carro_dedicado', 'carro_dedicado_flag', 'exclusivo']
-const CAMPOS_AGENDAMENTO = ['agenda', 'agendam', 'data_agenda', 'inicio_entrega', 'fim_entrega', 'status_agendamento', 'agendamento']
-const CAMPOS_RESTRICAO = ['restricao_veiculo', 'cliente_com_restricao', 'restricao']
+const CAMPOS_EXCLUSIVO = ['veiculo_exclusivo_flag', 'veiculo_exclusivo', 'exclusivo_flag', 'carro_dedicado', 'carro_dedicado_flag', 'exclusivo', 'dedicado']
+const CAMPOS_AGENDAMENTO = ['agendada', 'agenda', 'agendam', 'data_agenda', 'hora_agenda', 'janela', 'inicio_entrega', 'fim_entrega', 'status_agendamento', 'agendamento', 'info_agendamento']
+const CAMPOS_RESTRICAO = ['restricao_veiculo', 'cliente_com_restricao', 'restricao', 'restricoes', 'tem_restricao']
 
 const formatarKm = (valor: number | null | undefined): string => `${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km`
 const formatarMoeda = (valor: number | null | undefined): string => `R$ ${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -54,31 +54,91 @@ const formatarPeso = (valor: number | null | undefined): string => (valor ?? 0).
 const formatarPercentual = (valor: number | null | undefined): string => `${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
 
 const normalizarTexto = (valor: unknown): string => String(valor ?? '').trim().toLowerCase()
+const normalizarTextoBusca = (valor: unknown): string => normalizarTexto(valor)
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+
+const juntarRegistrosAninhados = (registro: Record<string, unknown>): Record<string, unknown> => {
+  const registroFinal: Record<string, unknown> = { ...registro }
+  const candidatos = [
+    registro.payload_apoio_json,
+    registro.extra_json,
+    registro.metadados,
+    registro.metadata,
+  ]
+  candidatos.forEach((candidato) => {
+    if (candidato && typeof candidato === 'object' && !Array.isArray(candidato)) {
+      Object.assign(registroFinal, candidato as Record<string, unknown>)
+    }
+  })
+  return registroFinal
+}
+
+const coletarTextosRegistro = (registro: Record<string, unknown>): string[] => {
+  const coletados: string[] = []
+  const visitar = (valor: unknown, profundidade = 0) => {
+    if (valor === null || valor === undefined || profundidade > 3) return
+    if (typeof valor === 'string') {
+      const normalizado = normalizarTextoBusca(valor)
+      if (normalizado) coletados.push(normalizado)
+      return
+    }
+    if (typeof valor === 'number' || typeof valor === 'boolean') {
+      coletados.push(String(valor).toLowerCase())
+      return
+    }
+    if (Array.isArray(valor)) {
+      valor.forEach((item) => visitar(item, profundidade + 1))
+      return
+    }
+    if (typeof valor === 'object') {
+      Object.values(valor as Record<string, unknown>).forEach((item) => visitar(item, profundidade + 1))
+    }
+  }
+  visitar(registro)
+  return coletados
+}
+
 const isTruthyFlag = (valor: unknown): boolean => {
   if (typeof valor === 'boolean') return valor
-  const texto = normalizarTexto(valor)
+  const texto = normalizarTextoBusca(valor)
   if (!texto) return false
-  return ['1', 'true', 'sim', 's', 'y', 'yes', 'exclusivo', 'agendado'].includes(texto)
+  return ['1', 'true', 'sim', 's', 'y', 'yes', 'exclusivo', 'agendado', 'restricao'].includes(texto)
 }
 
 type EspecificidadeVisual = 'normal' | 'exclusivo' | 'agendada' | 'restricao' | 'multipla'
 
-const temCampoVerdadeiro = (registro: Record<string, unknown>, campos: string[]): boolean => (
-  campos.some((campo) => isTruthyFlag(registro[campo]))
-)
+const temCampoVerdadeiro = (registro: Record<string, unknown>, campos: string[]): boolean => {
+  const registroExpandido = juntarRegistrosAninhados(registro)
+  return campos.some((campo) => isTruthyFlag(registroExpandido[campo]))
+}
 
-const temAgendamento = (registro: Record<string, unknown>): boolean => {
-  if (temCampoVerdadeiro(registro, CAMPOS_AGENDAMENTO)) return true
-  return CAMPOS_AGENDAMENTO.some((campo) => {
-    const valor = registro[campo]
-    return typeof valor === 'string' && valor.trim().length > 0
+const temTextoIndicativo = (registro: Record<string, unknown>, termos: string[], termosNegativos: string[] = []): boolean => {
+  const registroExpandido = juntarRegistrosAninhados(registro)
+  const textos = coletarTextosRegistro(registroExpandido)
+  return textos.some((texto) => {
+    const temPositivo = termos.some((termo) => texto.includes(termo))
+    if (!temPositivo) return false
+    return !termosNegativos.some((termoNegativo) => texto.includes(termoNegativo))
   })
 }
 
+const temAgendamento = (registro: Record<string, unknown>): boolean => {
+  const registroExpandido = juntarRegistrosAninhados(registro)
+  if (temCampoVerdadeiro(registroExpandido, CAMPOS_AGENDAMENTO)) return true
+  return CAMPOS_AGENDAMENTO.some((campo) => {
+    const valor = registroExpandido[campo]
+    return typeof valor === 'string' && valor.trim().length > 0
+  }) || temTextoIndicativo(registroExpandido, ['agendad', 'agenda', 'janela'], ['sem agenda', 'nao agend'])
+}
+
 const obterEspecificidadeVisual = (registro: Record<string, unknown>): EspecificidadeVisual => {
-  const exclusivo = temCampoVerdadeiro(registro, CAMPOS_EXCLUSIVO)
-  const agendada = temAgendamento(registro)
-  const restricao = temCampoVerdadeiro(registro, CAMPOS_RESTRICAO)
+  const registroExpandido = juntarRegistrosAninhados(registro)
+  const exclusivo = temCampoVerdadeiro(registroExpandido, CAMPOS_EXCLUSIVO)
+    || temTextoIndicativo(registroExpandido, ['exclusiv', 'dedicad'], ['nao exclusiv'])
+  const agendada = temAgendamento(registroExpandido)
+  const restricao = temCampoVerdadeiro(registroExpandido, CAMPOS_RESTRICAO)
+    || temTextoIndicativo(registroExpandido, ['restri'], ['sem restri', 'nao restri'])
   const total = [exclusivo, agendada, restricao].filter(Boolean).length
   if (total > 1) return 'multipla'
   if (exclusivo) return 'exclusivo'
