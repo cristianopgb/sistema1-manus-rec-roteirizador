@@ -330,10 +330,16 @@ const temSinalizacaoExclusiva = (registro: Record<string, unknown>): boolean => 
 }
 
 const temSinalizacaoAgendamento = (registro: Record<string, unknown>): boolean => {
+  if (toBooleanLike(registro.agendada) || toBooleanLike(registro.agendado)) return true
+  const sinalizacaoVisual = toRecord(registro.sinalizacao_visual)
+  if (sinalizacaoVisual && toBooleanLike(sinalizacaoVisual.agendada)) return true
   return hasNonEmptyText(registro.data_agenda)
     || hasNonEmptyText(registro.data_agendamento)
     || hasNonEmptyText(registro.dt_agendamento)
     || hasNonEmptyText(registro.data_programada)
+    || hasNonEmptyText(registro.agendam)
+    || hasNonEmptyText(registro['Agendam.'])
+    || hasNonEmptyText(registro.agenda)
 }
 
 const temSinalizacaoRestricao = (registro: Record<string, unknown>): boolean => {
