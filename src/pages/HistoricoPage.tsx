@@ -45,7 +45,7 @@ const textoSeguro = (valor: unknown): string => {
 }
 
 const CAMPOS_EXCLUSIVO = ['veiculo_exclusivo_flag', 'veiculo_exclusivo', 'exclusivo_flag', 'carro_dedicado', 'carro_dedicado_flag', 'exclusivo', 'dedicado', 'sinalizacao_visual.exclusivo']
-const CAMPOS_AGENDAMENTO = ['agendada', 'agenda', 'agendam', 'data_agenda', 'hora_agenda', 'janela', 'inicio_entrega', 'fim_entrega', 'status_agendamento', 'agendamento', 'info_agendamento', 'sinalizacao_visual.agendada']
+const CAMPOS_AGENDAMENTO_DATA = ['data_agenda', 'data_agendamento', 'dt_agendamento', 'data_programada']
 const CAMPOS_RESTRICAO = ['restricao_veiculo', 'cliente_com_restricao', 'restricao', 'restricoes', 'restricao_flag', 'tem_restricao', 'sinalizacao_visual.restricao']
 
 const formatarKm = (valor: number | null | undefined): string => `${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km`
@@ -57,6 +57,11 @@ const normalizarTexto = (valor: unknown): string => String(valor ?? '').trim().t
 const normalizarTextoBusca = (valor: unknown): string => normalizarTexto(valor)
   .normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '')
+const temTextoValido = (valor: unknown): boolean => {
+  const texto = normalizarTextoBusca(valor)
+  if (!texto) return false
+  return !['nat', 'null', 'undefined', '-', '—', 'na', 'n/a', 'sem agendamento', 'nao agendado'].includes(texto)
+}
 
 const juntarRegistrosAninhados = (registro: Record<string, unknown>): Record<string, unknown> => {
   const registroFinal: Record<string, unknown> = { ...registro }
@@ -134,11 +139,36 @@ const temTextoIndicativo = (registro: Record<string, unknown>, termos: string[],
 
 const temAgendamento = (registro: Record<string, unknown>): boolean => {
   const registroExpandido = juntarRegistrosAninhados(registro)
-  if (temCampoVerdadeiro(registroExpandido, CAMPOS_AGENDAMENTO)) return true
-  return CAMPOS_AGENDAMENTO.some((campo) => {
+  return CAMPOS_AGENDAMENTO_DATA.some((campo) => {
     const valor = registroExpandido[campo]
-    return typeof valor === 'string' && valor.trim().length > 0
-  }) || temTextoIndicativo(registroExpandido, ['agendad', 'agenda', 'janela'], ['sem agenda', 'nao agend'])
+    return temTextoValido(valor)
+  })
+}
+
+const obterDataHoraAgendamento = (item: ManifestoItemRoteirizacao): { data: string; hora: string; info: string } => {
+  const row = juntarRegistrosAninhados(item as unknown as Record<string, unknown>)
+  const dataBase = [
+    row.data_agenda,
+    row.data_agendamento,
+    row.dt_agendamento,
+    row.data_programada,
+  ].find((valor) => temTextoValido(valor))
+  const horaBase = [
+    row.hora_agenda,
+    row.hora_agendamento,
+    row.hora_programada,
+    row.hora_inicio_entrega,
+    row.hora_inicio_janela,
+    item.fim_entrega,
+    item.inicio_entrega,
+  ].find((valor) => temTextoValido(valor))
+  const janela = [row.janela, row.info_agendamento, row.status_agendamento].find((valor) => temTextoValido(valor))
+  const dataFormatada = formatarData(dataBase)
+  const hora = temTextoValido(horaBase) ? String(horaBase).trim() : '—'
+  const info = janela
+    ? String(janela).trim()
+    : `Agendamento para ${dataFormatada}${hora !== '—' ? ` - ${hora}` : ''}`
+  return { data: dataFormatada, hora, info }
 }
 
 const obterEspecificidadeVisual = (registro: Record<string, unknown>): EspecificidadeVisual => {
@@ -158,9 +188,9 @@ const obterEspecificidadeVisual = (registro: Record<string, unknown>): Especific
 
 const estiloEspecificidade: Record<EspecificidadeVisual, { marcador: string; fundo: string; badge: string; legenda: string }> = {
   normal: { marcador: 'bg-transparent', fundo: 'bg-white', badge: 'bg-gray-100 text-gray-600', legenda: 'Normal' },
-  exclusivo: { marcador: 'bg-blue-500', fundo: 'bg-blue-50/40', badge: 'bg-blue-100 text-blue-700', legenda: 'Exclusivo' },
+  exclusivo: { marcador: 'bg-blue-500', fundo: 'bg-blue-50/40', badge: 'bg-blue-100 text-blue-700', legenda: 'Veículo exclusivo' },
   agendada: { marcador: 'bg-amber-400', fundo: 'bg-amber-50/40', badge: 'bg-amber-100 text-amber-700', legenda: 'Agendada' },
-  restricao: { marcador: 'bg-emerald-500', fundo: 'bg-emerald-50/40', badge: 'bg-emerald-100 text-emerald-700', legenda: 'Restrição' },
+  restricao: { marcador: 'bg-emerald-500', fundo: 'bg-emerald-50/40', badge: 'bg-emerald-100 text-emerald-700', legenda: 'Restrição de veículo' },
   multipla: { marcador: 'bg-red-500', fundo: 'bg-red-50/40', badge: 'bg-red-100 text-red-700', legenda: 'Múltiplas' },
 }
 
@@ -1041,16 +1071,16 @@ export function HistoricoPage() {
                         </thead>
                         <tbody>
                           {itensAgendados.map((item) => {
-                            const extra = item as unknown as Record<string, unknown>
+                            const agendamento = obterDataHoraAgendamento(item)
                             return (
                               <tr key={`ag-${item.id}`} className="border-b border-amber-200">
                                 <td className="py-1">{item.nro_documento || '—'}</td>
                                 <td>{item.destinatario || '—'}</td>
                                 <td>{item.cidade || '—'}</td>
                                 <td>{item.uf || '—'}</td>
-                                <td>{formatarData(extra.data_agenda ?? item.inicio_entrega)}</td>
-                                <td>{item.fim_entrega || item.inicio_entrega || '—'}</td>
-                                <td>{`Agendamento para ${formatarData(extra.data_agenda ?? item.inicio_entrega)}${(item.fim_entrega || item.inicio_entrega) ? ` - ${item.fim_entrega || item.inicio_entrega}` : ''}`}</td>
+                                <td>{agendamento.data}</td>
+                                <td>{agendamento.hora}</td>
+                                <td>{agendamento.info}</td>
                               </tr>
                             )
                           })}

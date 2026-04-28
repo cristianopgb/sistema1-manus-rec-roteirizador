@@ -314,7 +314,10 @@ const toBooleanLike = (value: unknown): boolean => {
 }
 
 const hasNonEmptyText = (value: unknown): boolean => {
-  return typeof value === 'string' && value.trim().length > 0
+  if (typeof value !== 'string') return false
+  const text = value.trim().toLowerCase()
+  if (!text) return false
+  return !['nat', 'null', 'undefined', '-', '—', 'na', 'n/a', 'sem agendamento', 'nao agendado'].includes(text)
 }
 
 const temSinalizacaoExclusiva = (registro: Record<string, unknown>): boolean => {
@@ -327,18 +330,10 @@ const temSinalizacaoExclusiva = (registro: Record<string, unknown>): boolean => 
 }
 
 const temSinalizacaoAgendamento = (registro: Record<string, unknown>): boolean => {
-  return toBooleanLike(registro.agendada)
-    || toBooleanLike(registro.agendamento)
-    || toBooleanLike(registro.status_agendamento)
-    || hasNonEmptyText(registro.data_agenda)
-    || hasNonEmptyText(registro.hora_agenda)
-    || hasNonEmptyText(registro.inicio_entrega)
-    || hasNonEmptyText(registro.fim_entrega)
-    || hasNonEmptyText(registro.inicio_janela_entrega)
-    || hasNonEmptyText(registro.fim_janela_entrega)
-    || hasNonEmptyText(registro.hora_inicio_entrega)
-    || hasNonEmptyText(registro.hora_fim_entrega)
-    || hasNonEmptyText(registro.janela)
+  return hasNonEmptyText(registro.data_agenda)
+    || hasNonEmptyText(registro.data_agendamento)
+    || hasNonEmptyText(registro.dt_agendamento)
+    || hasNonEmptyText(registro.data_programada)
 }
 
 const temSinalizacaoRestricao = (registro: Record<string, unknown>): boolean => {
