@@ -305,6 +305,52 @@ const pickFirstText = (...values: unknown[]): string | null => {
   return null
 }
 
+const toBooleanLike = (value: unknown): boolean => {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  const text = toText(value)?.toLowerCase()
+  if (!text) return false
+  return ['1', 'true', 'sim', 's', 'yes', 'y', 'ok', 'agendado', 'exclusivo', 'restricao'].includes(text)
+}
+
+const hasNonEmptyText = (value: unknown): boolean => {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+const temSinalizacaoExclusiva = (registro: Record<string, unknown>): boolean => {
+  return toBooleanLike(registro.exclusivo_flag)
+    || toBooleanLike(registro.veiculo_exclusivo_flag)
+    || toBooleanLike(registro.veiculo_exclusivo)
+    || toBooleanLike(registro.exclusivo)
+    || toBooleanLike(registro.carro_dedicado)
+    || toBooleanLike(registro.carro_dedicado_flag)
+}
+
+const temSinalizacaoAgendamento = (registro: Record<string, unknown>): boolean => {
+  return toBooleanLike(registro.agendada)
+    || toBooleanLike(registro.agendamento)
+    || toBooleanLike(registro.status_agendamento)
+    || hasNonEmptyText(registro.data_agenda)
+    || hasNonEmptyText(registro.hora_agenda)
+    || hasNonEmptyText(registro.inicio_entrega)
+    || hasNonEmptyText(registro.fim_entrega)
+    || hasNonEmptyText(registro.inicio_janela_entrega)
+    || hasNonEmptyText(registro.fim_janela_entrega)
+    || hasNonEmptyText(registro.hora_inicio_entrega)
+    || hasNonEmptyText(registro.hora_fim_entrega)
+    || hasNonEmptyText(registro.janela)
+}
+
+const temSinalizacaoRestricao = (registro: Record<string, unknown>): boolean => {
+  return toBooleanLike(registro.restricao)
+    || toBooleanLike(registro.restricoes)
+    || toBooleanLike(registro.restricao_veiculo)
+    || toBooleanLike(registro.cliente_com_restricao)
+    || toBooleanLike(registro.tem_restricao)
+    || String(registro.motivo ?? '').toLowerCase().includes('restri')
+    || String(registro.status_triagem ?? '').toLowerCase().includes('restri')
+}
+
 const toRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   return value as Record<string, unknown>
@@ -428,9 +474,28 @@ export const roteirizacaoService = {
       return item.codigo_tipo === 5 || nomeTipo === 'CARGA GERAL'
     })
 
+    const [{ error: payloadManifestoProbeError }, { error: payloadItemProbeError }] = await Promise.all([
+      supabase.from('manifestos_roteirizacao').select('id, payload_apoio_json').limit(1),
+      supabase.from('manifestos_itens').select('id, payload_apoio_json').limit(1),
+    ])
+    const inserirPayloadManifesto = !payloadManifestoProbeError
+    const inserirPayloadItem = !payloadItemProbeError
+
+    const itensM7PorManifesto = itensM7.reduce<Record<string, Array<Record<string, unknown>>>>((acc, item) => {
+      const manifestoId = toText(item.manifesto_id)
+      if (!manifestoId) return acc
+      if (!acc[manifestoId]) acc[manifestoId] = []
+      acc[manifestoId].push(item)
+      return acc
+    }, {})
+
     const registrosManifestos = manifestosM7.map((manifestoRaw, index) => {
       const manifestoId = toText(manifestoRaw.manifesto_id)
       if (!manifestoId) throw new Error(`Manifesto M7 inválido: índice ${index} sem manifesto_id`)
+      const itensDoManifesto = itensM7PorManifesto[manifestoId] ?? []
+      const exclusivoManifesto = temSinalizacaoExclusiva(manifestoRaw) || itensDoManifesto.some((item) => temSinalizacaoExclusiva(item))
+      const agendamentoManifesto = temSinalizacaoAgendamento(manifestoRaw) || itensDoManifesto.some((item) => temSinalizacaoAgendamento(item))
+      const restricaoManifesto = temSinalizacaoRestricao(manifestoRaw) || itensDoManifesto.some((item) => temSinalizacaoRestricao(item))
       const perfilManifesto = toText(
         manifestoRaw.perfil_final_m6_2
         ?? manifestoRaw.veiculo_perfil
@@ -500,6 +565,7 @@ export const roteirizacaoService = {
         veiculo_perfil: perfilManifesto,
         veiculo_tipo: perfilManifesto,
         qtd_eixos: Math.trunc(qtdEixos),
+        exclusivo_flag: exclusivoManifesto,
         peso_total: toNumber(manifestoRaw.peso_final_m6_2, Number.NaN),
         ocupacao: toNumber(manifestoRaw.ocupacao_final_m6_2, Number.NaN),
         km_total: kmTotal,
@@ -508,6 +574,16 @@ export const roteirizacaoService = {
         frete_minimo: freteMinimo,
         origem_modulo: pickFirstText(manifestoRaw.origem_manifesto_modulo),
         tipo_manifesto: pickFirstText(manifestoRaw.origem_manifesto_tipo),
+        ...(inserirPayloadManifesto ? {
+          payload_apoio_json: {
+            ...manifestoRaw,
+            sinalizacao_visual: {
+              exclusivo: exclusivoManifesto,
+              agendada: agendamentoManifesto,
+              restricao: restricaoManifesto,
+            },
+          },
+        } : {}),
       }
     })
     console.log('[FRETE MINIMO] calculados', {
@@ -531,6 +607,9 @@ export const roteirizacaoService = {
       if (ordemParadaM7 === undefined || ordemParadaM7 === null || String(ordemParadaM7).trim() === '') {
         throw new Error(`Item M7 inválido: id_linha_pipeline ${idLinhaPipeline} sem ordem_parada_m7 ou ordem_entrega_parada_m7`)
       }
+      const exclusivoItem = temSinalizacaoExclusiva(item)
+      const agendamentoItem = temSinalizacaoAgendamento(item)
+      const restricaoItem = temSinalizacaoRestricao(item)
       return {
         rodada_id: rodadaId,
         manifesto_id: manifestoId,
@@ -541,6 +620,30 @@ export const roteirizacaoService = {
         uf: toText(item.uf),
         peso: toNumber(item.peso_calculado, Number.NaN),
         distancia_km: toNumber(item.distancia_rodoviaria_est_km, 0),
+        inicio_entrega: pickFirstText(
+          item.inicio_entrega,
+          item.hora_inicio_entrega,
+          item.hora_inicio_janela,
+          item.inicio_janela_entrega,
+          item.data_agenda,
+        ),
+        fim_entrega: pickFirstText(
+          item.fim_entrega,
+          item.hora_fim_entrega,
+          item.hora_fim_janela,
+          item.fim_janela_entrega,
+          item.hora_agenda,
+        ),
+        ...(inserirPayloadItem ? {
+          payload_apoio_json: {
+            ...item,
+            sinalizacao_visual: {
+              exclusivo: exclusivoItem,
+              agendada: agendamentoItem,
+              restricao: restricaoItem,
+            },
+          },
+        } : {}),
         latitude: pickFirstNumber(item.latitude_destinatario),
         longitude: pickFirstNumber(item.longitude_destinatario),
       }
