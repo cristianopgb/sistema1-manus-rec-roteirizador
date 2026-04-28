@@ -44,6 +44,78 @@ const textoSeguro = (valor: unknown): string => {
   return txt || '-'
 }
 
+const CAMPOS_EXCLUSIVO = ['veiculo_exclusivo_flag', 'exclusivo_flag', 'carro_dedicado', 'carro_dedicado_flag', 'exclusivo']
+const CAMPOS_AGENDAMENTO = ['agenda', 'agendam', 'data_agenda', 'inicio_entrega', 'fim_entrega', 'status_agendamento', 'agendamento']
+const CAMPOS_RESTRICAO = ['restricao_veiculo', 'cliente_com_restricao', 'restricao']
+
+const formatarKm = (valor: number | null | undefined): string => `${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km`
+const formatarMoeda = (valor: number | null | undefined): string => `R$ ${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const formatarPeso = (valor: number | null | undefined): string => (valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
+const formatarPercentual = (valor: number | null | undefined): string => `${(valor ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+
+const normalizarTexto = (valor: unknown): string => String(valor ?? '').trim().toLowerCase()
+const isTruthyFlag = (valor: unknown): boolean => {
+  if (typeof valor === 'boolean') return valor
+  const texto = normalizarTexto(valor)
+  if (!texto) return false
+  return ['1', 'true', 'sim', 's', 'y', 'yes', 'exclusivo', 'agendado'].includes(texto)
+}
+
+type EspecificidadeVisual = 'normal' | 'exclusivo' | 'agendada' | 'restricao' | 'multipla'
+
+const temCampoVerdadeiro = (registro: Record<string, unknown>, campos: string[]): boolean => (
+  campos.some((campo) => isTruthyFlag(registro[campo]))
+)
+
+const temAgendamento = (registro: Record<string, unknown>): boolean => {
+  if (temCampoVerdadeiro(registro, CAMPOS_AGENDAMENTO)) return true
+  return CAMPOS_AGENDAMENTO.some((campo) => {
+    const valor = registro[campo]
+    return typeof valor === 'string' && valor.trim().length > 0
+  })
+}
+
+const obterEspecificidadeVisual = (registro: Record<string, unknown>): EspecificidadeVisual => {
+  const exclusivo = temCampoVerdadeiro(registro, CAMPOS_EXCLUSIVO)
+  const agendada = temAgendamento(registro)
+  const restricao = temCampoVerdadeiro(registro, CAMPOS_RESTRICAO)
+  const total = [exclusivo, agendada, restricao].filter(Boolean).length
+  if (total > 1) return 'multipla'
+  if (exclusivo) return 'exclusivo'
+  if (agendada) return 'agendada'
+  if (restricao) return 'restricao'
+  return 'normal'
+}
+
+const estiloEspecificidade: Record<EspecificidadeVisual, { marcador: string; fundo: string; badge: string; legenda: string }> = {
+  normal: { marcador: 'bg-transparent', fundo: 'bg-white', badge: 'bg-gray-100 text-gray-600', legenda: 'Normal' },
+  exclusivo: { marcador: 'bg-blue-500', fundo: 'bg-blue-50/40', badge: 'bg-blue-100 text-blue-700', legenda: 'Exclusivo' },
+  agendada: { marcador: 'bg-amber-400', fundo: 'bg-amber-50/40', badge: 'bg-amber-100 text-amber-700', legenda: 'Agendada' },
+  restricao: { marcador: 'bg-emerald-500', fundo: 'bg-emerald-50/40', badge: 'bg-emerald-100 text-emerald-700', legenda: 'Restrição' },
+  multipla: { marcador: 'bg-red-500', fundo: 'bg-red-50/40', badge: 'bg-red-100 text-red-700', legenda: 'Múltiplas' },
+}
+
+const formatarData = (valor: unknown, comHora = false): string => {
+  if (!valor) return '—'
+  const data = new Date(String(valor))
+  if (Number.isNaN(data.getTime())) return '—'
+  return format(data, comHora ? 'dd/MM/yyyy HH:mm' : 'dd/MM/yyyy', { locale: ptBR })
+}
+
+const coletarValores = (itens: ManifestoItemRoteirizacao[], campos: string[]): string[] => {
+  const set = new Set<string>()
+  itens.forEach((item) => {
+    const row = item as unknown as Record<string, unknown>
+    campos.forEach((campo) => {
+      const valor = String(row[campo] ?? '').trim()
+      if (valor) set.add(valor)
+    })
+  })
+  return Array.from(set)
+}
+
+const juntarValores = (valores: string[], separador = ' / '): string => (valores.length ? valores.join(separador) : '—')
+
 export function HistoricoPage() {
   const { isMaster, filialAtiva } = useAuth()
   const [searchParams] = useSearchParams()
@@ -404,8 +476,66 @@ export function HistoricoPage() {
   }, [estatisticas, manifestos, remanescentesNormalizados, rodadaSelecionada])
 
   const itensAgendados = useMemo(() => (
-    itensManifesto.filter((item) => Boolean(item.inicio_entrega || item.fim_entrega || (item as unknown as Record<string, unknown>).data_agenda))
+    itensManifesto.filter((item) => temAgendamento(item as unknown as Record<string, unknown>))
   ), [itensManifesto])
+
+  const manifestosComSinalizacao = useMemo(() => (
+    manifestos.map((manifesto) => ({
+      manifesto,
+      especificidade: obterEspecificidadeVisual(manifesto as unknown as Record<string, unknown>),
+    }))
+  ), [manifestos])
+
+  const itensComSinalizacao = useMemo(() => (
+    itensManifesto.map((item) => ({
+      item,
+      especificidade: obterEspecificidadeVisual(item as unknown as Record<string, unknown>),
+    }))
+  ), [itensManifesto])
+
+  const resumoOperacional = useMemo(() => {
+    const remetentes = coletarValores(itensManifesto, ['remetente', 'tomad'])
+    const destinatarios = coletarValores(itensManifesto, ['destinatario'])
+    const cidades = coletarValores(itensManifesto, ['cidade'])
+    const docs = coletarValores(itensManifesto, ['nro_documento', 'documento', 'ctrc'])
+    const linhaRota = coletarValores(itensManifesto, ['linha', 'rota', 'tipo_carga', 'tipo_ca'])
+    const tipoCarga = coletarValores(itensManifesto, ['tipo_carga', 'tipo_ca', 'classif'])
+    const senhaSar = coletarValores(itensManifesto, ['senha_sar', 'sar'])
+    const atendente = coletarValores(itensManifesto, ['atendente'])
+    const nfsDatas = itensManifesto.map((item) => {
+      const row = item as unknown as Record<string, unknown>
+      const nf = String(row.nf ?? row.nro_nf ?? row.nota_fiscal ?? '').trim()
+      const dataNf = formatarData(row.data_nf)
+      if (!nf && dataNf === '—') return ''
+      return `NF ${nf || '—'}${dataNf !== '—' ? ` - ${dataNf}` : ''}`
+    }).filter(Boolean)
+
+    const pesoBruto = itensManifesto.reduce((acc, item) => acc + (item.peso ?? 0), 0)
+    const valorMercadoria = itensManifesto.reduce((acc, item) => {
+      const row = item as unknown as Record<string, unknown>
+      const valor = Number(row.valor_mercadoria ?? row.vlr_merc ?? 0)
+      return acc + (Number.isFinite(valor) ? valor : 0)
+    }, 0)
+    const dataChegada = juntarValores(coletarValores(itensManifesto, ['data_chegada']).map((v) => formatarData(v)))
+    const dataDescarga = juntarValores(coletarValores(itensManifesto, ['data_descarga', 'data_des']).map((v) => formatarData(v)))
+
+    return {
+      linhaRota: juntarValores(linhaRota),
+      remetente: juntarValores(remetentes),
+      nfData: juntarValores(nfsDatas),
+      destinatario: juntarValores(destinatarios),
+      cidade: juntarValores(cidades),
+      documento: juntarValores(docs),
+      pesoBruto: pesoBruto > 0 ? formatarPeso(pesoBruto) : '—',
+      pesoKg: pesoBruto > 0 ? formatarPeso(pesoBruto) : '—',
+      valorMercadoria: valorMercadoria > 0 ? formatarMoeda(valorMercadoria) : '—',
+      tipoCarga: juntarValores(tipoCarga),
+      dataChegada,
+      dataDescarga,
+      senhaSar: juntarValores(senhaSar),
+      atendente: juntarValores(atendente),
+    }
+  }, [itensManifesto])
 
   const resumoRemanescentes = useMemo(() => {
     const total = remanescentesNormalizados.length
@@ -492,7 +622,7 @@ export function HistoricoPage() {
                   <th className="text-right px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[110px]">Manifestos</th>
                   <th className="text-right px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[90px]">Itens</th>
                   <th className="text-right px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[95px]">Ocupação</th>
-                  <th className="text-right px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[120px]">KM Total</th>
+                  <th className="text-right px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[150px]">KM Médio/Manifesto</th>
                 </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -505,8 +635,8 @@ export function HistoricoPage() {
                       <td className="px-3 py-2 text-right text-gray-700">{r.total_cargas_entrada?.toLocaleString('pt-BR') || '—'}</td>
                       <td className="px-3 py-2 text-right font-semibold text-brand-700">{r.total_manifestos?.toLocaleString('pt-BR') || '—'}</td>
                       <td className="px-3 py-2 text-right text-gray-700">{r.total_itens_manifestados?.toLocaleString('pt-BR') || '—'}</td>
-                      <td className="px-3 py-2 text-right text-gray-700">{r.ocupacao_media_percentual != null ? `${r.ocupacao_media_percentual.toFixed(1)}%` : '—'}</td>
-                      <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">{r.km_total_frota != null ? `${r.km_total_frota.toLocaleString('pt-BR')} km` : '—'}</td>
+                      <td className="px-3 py-2 text-right text-gray-700">{r.ocupacao_media_percentual != null ? formatarPercentual(r.ocupacao_media_percentual) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">{formatarKm((r.total_manifestos || 0) > 0 ? (r.km_total_frota || 0) / r.total_manifestos : 0)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -536,8 +666,17 @@ export function HistoricoPage() {
 
           {!detalhesLoading && tabAtiva === 'manifestos' && (
             <div className="space-y-3">
-              {manifestos.length === 0 ? <p className="text-sm text-gray-500">Sem manifestos estruturados para esta rodada.</p> : manifestos.map((m) => (
-                <button key={m.id} onClick={() => void abrirManifesto(m)} className="w-full text-left border border-gray-200 rounded-lg p-3 hover:bg-gray-50">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
+                {(['exclusivo', 'agendada', 'restricao', 'multipla'] as EspecificidadeVisual[]).map((tipo) => (
+                  <span key={tipo} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full ${estiloEspecificidade[tipo].badge}`}>
+                    <span className={`w-2 h-2 rounded-full ${estiloEspecificidade[tipo].marcador}`} />
+                    {tipo === 'exclusivo' ? 'Azul = Exclusivo' : tipo === 'agendada' ? 'Amarelo = Agendada' : tipo === 'restricao' ? 'Verde = Restrição' : 'Vermelho = Múltiplas especificidades'}
+                  </span>
+                ))}
+              </div>
+              {manifestosComSinalizacao.length === 0 ? <p className="text-sm text-gray-500">Sem manifestos estruturados para esta rodada.</p> : manifestosComSinalizacao.map(({ manifesto: m, especificidade }) => (
+                <button key={m.id} onClick={() => void abrirManifesto(m)} className={`w-full text-left border border-gray-200 rounded-lg p-3 hover:bg-gray-50 relative overflow-hidden ${estiloEspecificidade[especificidade].fundo}`}>
+                  <span className={`absolute left-0 top-0 h-full w-1 ${estiloEspecificidade[especificidade].marcador}`} />
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-2 text-xs">
                     <div><span className="text-gray-500 block">Manifesto</span><strong>{m.manifesto_id}</strong></div>
                     <div><span className="text-gray-500 block">Entregas</span><strong>{m.qtd_entregas}</strong></div>
@@ -547,7 +686,8 @@ export function HistoricoPage() {
                     <div><span className="text-gray-500 block">Ocupação</span><strong>{m.ocupacao.toFixed(1)}%</strong></div>
                     <div><span className="text-gray-500 block">Veículo/Perfil</span><strong>{m.veiculo_perfil || m.veiculo_tipo || '—'}</strong></div>
                     <div><span className="text-gray-500 block">Eixos</span><strong>{m.qtd_eixos ?? '—'}</strong></div>
-                    <div><span className="text-gray-500 block">Frete mínimo</span><strong>R$ {m.frete_minimo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></div>
+                    <div><span className="text-gray-500 block">Frete mínimo</span><strong>{formatarMoeda(m.frete_minimo)}</strong></div>
+                    <div><span className="text-gray-500 block">Sinalização</span><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${estiloEspecificidade[especificidade].badge}`}>{estiloEspecificidade[especificidade].legenda}</span></div>
                   </div>
                 </button>
               ))}
@@ -756,27 +896,32 @@ export function HistoricoPage() {
               <div><span className="text-gray-500 block">Data da rodada</span><strong>{rodadaSelecionada.created_at ? format(new Date(rodadaSelecionada.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '—'}</strong></div>
               <div><span className="text-gray-500 block">Veículo / Perfil</span><strong>{manifestoAtivo.veiculo_perfil || manifestoAtivo.veiculo_tipo || '—'}</strong></div>
               <div><span className="text-gray-500 block">Qtd. eixos</span><strong>{manifestoAtivo.qtd_eixos ?? '—'}</strong></div>
-              <div><span className="text-gray-500 block">KM total</span><strong>{manifestoAtivo.km_total.toLocaleString('pt-BR')}</strong></div>
-              <div><span className="text-gray-500 block">Peso total</span><strong>{manifestoAtivo.peso_total.toLocaleString('pt-BR')}</strong></div>
+              <div><span className="text-gray-500 block">KM total</span><strong>{formatarKm(manifestoAtivo.km_total)}</strong></div>
+              <div><span className="text-gray-500 block">Peso total</span><strong>{formatarPeso(manifestoAtivo.peso_total)} kg</strong></div>
               <div><span className="text-gray-500 block">Qtd. entregas</span><strong>{manifestoAtivo.qtd_entregas}</strong></div>
-              <div><span className="text-gray-500 block">Frete mínimo</span><strong>R$ {manifestoAtivo.frete_minimo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></div>
+              <div><span className="text-gray-500 block">Frete mínimo</span><strong>{formatarMoeda(manifestoAtivo.frete_minimo)}</strong></div>
             </div>
 
             {manifestoLoading ? <div className="text-sm text-gray-500">Carregando entregas...</div> : (
               <>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="border-b"><tr><th className="text-left py-2">Sequência</th><th className="text-left">Documento</th><th className="text-left">Destinatário</th><th className="text-left">Cidade</th><th className="text-left">UF</th><th className="text-left">Peso</th><th className="text-left">Janela</th><th className="text-left">Ações</th></tr></thead>
+                    <thead className="border-b"><tr><th className="text-left py-2">Tipo</th><th className="text-left py-2">Sequência</th><th className="text-left">Documento</th><th className="text-left">Destinatário</th><th className="text-left">Cidade</th><th className="text-left">UF</th><th className="text-left">Peso</th><th className="text-left">Janela</th><th className="text-left">Ações</th></tr></thead>
                     <tbody>
-                      {itensManifesto.map((item, index) => (
-                        <tr key={item.id} className="border-b">
+                      {itensComSinalizacao.map(({ item, especificidade }, index) => (
+                        <tr key={item.id} className={`border-b ${estiloEspecificidade[especificidade].fundo}`}>
+                          <td className="py-2">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${estiloEspecificidade[especificidade].badge}`}>
+                              {estiloEspecificidade[especificidade].legenda}
+                            </span>
+                          </td>
                           <td className="py-2">{item.sequencia}</td>
                           <td>{item.nro_documento || '—'}</td>
                           <td>{item.destinatario || '—'}</td>
                           <td>{item.cidade || '—'}</td>
                           <td>{item.uf || '—'}</td>
-                          <td>{item.peso?.toLocaleString('pt-BR') || '—'}</td>
-                          <td>{item.inicio_entrega || '—'} - {item.fim_entrega || '—'}</td>
+                          <td>{item.peso != null ? `${formatarPeso(item.peso)} kg` : '—'}</td>
+                          <td>{item.inicio_entrega || '—'}{item.fim_entrega ? ` - ${item.fim_entrega}` : ''}</td>
                           <td className="space-x-2"><button onClick={() => alterarSequencia(index, -1)} className="px-2 py-1 bg-gray-100 rounded">↑</button><button onClick={() => alterarSequencia(index, 1)} className="px-2 py-1 bg-gray-100 rounded">↓</button></td>
                         </tr>
                       ))}
@@ -787,20 +932,20 @@ export function HistoricoPage() {
                   <h4 className="text-sm font-semibold text-gray-800">Romaneio / Resumo operacional</h4>
                   <div className="grid md:grid-cols-3 gap-2 text-xs">
                     {[
-                      ['Linha / rota', manifestoAtivo.tipo_manifesto || manifestoAtivo.manifesto_id || '—'],
-                      ['Remetente', '—'],
-                      ['N. Fiscal(s)/Data', '—'],
-                      ['Destinatário', itensManifesto[0]?.destinatario || '—'],
-                      ['Cidade', itensManifesto[0] ? `${itensManifesto[0].cidade || '—'} / ${itensManifesto[0].uf || '—'}` : '—'],
-                      ['Doc CTRC / documento', itensManifesto[0]?.nro_documento || '—'],
-                      ['Peso bruto', manifestoAtivo.peso_total?.toLocaleString('pt-BR') || '—'],
-                      ['Peso KG', manifestoAtivo.peso_total?.toLocaleString('pt-BR') || '—'],
-                      ['Valor da mercadoria', '—'],
-                      ['Tipo de carga', manifestoAtivo.tipo_manifesto || '—'],
-                      ['Data chegada', '—'],
-                      ['Data descarga', '—'],
-                      ['Senha do SAR', '—'],
-                      ['Atendente', rodadaSelecionada.usuario_nome || '—'],
+                      ['Linha / rota', resumoOperacional.linhaRota !== '—' ? resumoOperacional.linhaRota : (manifestoAtivo.tipo_manifesto || manifestoAtivo.manifesto_id || '—')],
+                      ['Remetente', resumoOperacional.remetente],
+                      ['N. Fiscal(s)/Data', resumoOperacional.nfData],
+                      ['Destinatário', resumoOperacional.destinatario],
+                      ['Cidade', resumoOperacional.cidade],
+                      ['Doc CTRC / documento', resumoOperacional.documento],
+                      ['Peso bruto', resumoOperacional.pesoBruto],
+                      ['Peso KG', resumoOperacional.pesoKg],
+                      ['Valor da mercadoria', resumoOperacional.valorMercadoria],
+                      ['Tipo de carga', resumoOperacional.tipoCarga !== '—' ? resumoOperacional.tipoCarga : (manifestoAtivo.tipo_manifesto || '—')],
+                      ['Data chegada', resumoOperacional.dataChegada],
+                      ['Data descarga', resumoOperacional.dataDescarga],
+                      ['Senha do SAR', resumoOperacional.senhaSar],
+                      ['Atendente', resumoOperacional.atendente !== '—' ? resumoOperacional.atendente : (rodadaSelecionada.usuario_nome || '—')],
                     ].map(([label, value]) => (
                       <div key={label} className="bg-gray-50 rounded p-2 border border-gray-100">
                         <div className="text-gray-500">{label}</div>
@@ -811,7 +956,7 @@ export function HistoricoPage() {
                 </div>
                 {itensAgendados.length > 0 ? (
                   <div className="border border-amber-300 bg-amber-50 rounded-lg p-3 space-y-2">
-                    <h4 className="text-sm font-semibold text-amber-900">Cargas agendadas em destaque ({itensAgendados.length})</h4>
+                    <h4 className="text-sm font-semibold text-amber-900">Agendamentos ({itensAgendados.length})</h4>
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
@@ -834,9 +979,9 @@ export function HistoricoPage() {
                                 <td>{item.destinatario || '—'}</td>
                                 <td>{item.cidade || '—'}</td>
                                 <td>{item.uf || '—'}</td>
-                                <td>{String(extra.data_agenda ?? '—')}</td>
-                                <td>{`${item.inicio_entrega || '—'} - ${item.fim_entrega || '—'}`}</td>
-                                <td>{String(extra.janela ?? extra.info_agendamento ?? 'Agendada')}</td>
+                                <td>{formatarData(extra.data_agenda ?? item.inicio_entrega)}</td>
+                                <td>{item.fim_entrega || item.inicio_entrega || '—'}</td>
+                                <td>{`Agendamento para ${formatarData(extra.data_agenda ?? item.inicio_entrega)}${(item.fim_entrega || item.inicio_entrega) ? ` - ${item.fim_entrega || item.inicio_entrega}` : ''}`}</td>
                               </tr>
                             )
                           })}
@@ -844,9 +989,7 @@ export function HistoricoPage() {
                       </table>
                     </div>
                   </div>
-                ) : (
-                  <p className="text-xs text-gray-500">Sem cargas agendadas.</p>
-                )}
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   <button disabled={itensManifesto.length === 0} onClick={() => void salvarSequencia()} className="px-4 py-2 text-sm rounded-lg bg-brand-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">Salvar ordem</button>
                   <button disabled={itensManifesto.length === 0} onClick={desfazerSequencia} className="px-4 py-2 text-sm rounded-lg bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">Desfazer</button>
