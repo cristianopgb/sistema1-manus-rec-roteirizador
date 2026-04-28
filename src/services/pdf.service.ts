@@ -2,6 +2,60 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { ManifestoComFrete, ManifestoItemRoteirizacao, ManifestoRoteirizacaoDetalhe } from '@/types'
 
+const temTextoValido = (value: unknown): boolean => {
+  if (typeof value !== 'string') return false
+  const text = value.trim().toLowerCase()
+  if (!text) return false
+  return !['nat', 'null', 'undefined', '-', '—', 'na', 'n/a', 'sem agendamento', 'nao agendado'].includes(text)
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+const isTruthyFlag = (value: unknown): boolean => {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  if (typeof value !== 'string') return false
+  const text = value.trim().toLowerCase()
+  return ['1', 'true', 'sim', 's', 'yes', 'y', 'ok', 'agendado', 'agendada'].includes(text)
+}
+
+const itemTemAgendamento = (item: ManifestoItemRoteirizacao): boolean => {
+  const extra = item as unknown as Record<string, unknown>
+  const payloadApoio = asRecord(item.payload_apoio_json)
+
+  if (isTruthyFlag(extra.agendada) || isTruthyFlag(extra.agendado)) return true
+  if (payloadApoio && (isTruthyFlag(payloadApoio.agendada) || isTruthyFlag(payloadApoio.agendado))) return true
+
+  const sinalizacaoVisual = asRecord(extra.sinalizacao_visual) ?? asRecord(payloadApoio?.sinalizacao_visual)
+  if (sinalizacaoVisual && isTruthyFlag(sinalizacaoVisual.agendada)) return true
+
+  return [
+    extra.data_agenda,
+    extra.data_agendamento,
+    extra.dt_agendamento,
+    extra.data_programada,
+    extra.agendam,
+    extra['Agendam.'],
+    extra.agenda,
+    extra.janela,
+    extra.info_agendamento,
+    payloadApoio?.data_agenda,
+    payloadApoio?.data_agendamento,
+    payloadApoio?.dt_agendamento,
+    payloadApoio?.data_programada,
+    payloadApoio?.agendam,
+    payloadApoio?.['Agendam.'],
+    payloadApoio?.agenda,
+    payloadApoio?.janela,
+    payloadApoio?.info_agendamento,
+    item.inicio_entrega,
+    item.fim_entrega,
+  ].some((value) => temTextoValido(value))
+}
+
 export async function gerarPdfManifesto(manifesto: ManifestoComFrete): Promise<void> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
@@ -262,10 +316,7 @@ export async function gerarPdfManifestoOperacional(
   doc.setFont('helvetica', 'bold')
   doc.text(`ITENS (${itens.length})`, margin, yAposResumo)
 
-  const itensAgendados = itens.filter((item) => {
-    const extra = item as unknown as Record<string, unknown>
-    return Boolean(item.inicio_entrega || item.fim_entrega || extra.data_agenda || extra.janela)
-  })
+  const itensAgendados = itens.filter(itemTemAgendamento)
 
   autoTable(doc, {
     startY: yAposResumo + 3,
