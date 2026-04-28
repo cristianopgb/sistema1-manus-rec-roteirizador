@@ -38,6 +38,11 @@ const navItems: (NavItem | NavGroup)[] = [
     icon: <History size={18} />,
   },
   {
+    label: 'Rotas dos Manifestos',
+    to: '/rotas',
+    icon: <Route size={18} />,
+  },
+  {
     label: 'Cadastros',
     icon: <Settings size={18} />,
     masterOnly: true,

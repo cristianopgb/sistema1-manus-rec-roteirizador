@@ -530,6 +530,42 @@ export interface EstatisticasRoteirizacao {
   updated_at: string
 }
 
+export interface RotaManifestoParadaGoogle {
+  ordem: number
+  latitude: number
+  longitude: number
+  cidade: string | null
+  uf: string | null
+  destinatarios: string[]
+  documentos: string[]
+}
+
+export interface RotaManifestoGoogle {
+  id: string
+  rodada_id: string
+  manifesto_id: string
+  manifesto_db_id: string | null
+  rota_hash: string
+  origem_latitude: number
+  origem_longitude: number
+  destino_latitude: number | null
+  destino_longitude: number | null
+  paradas_json: RotaManifestoParadaGoogle[]
+  qtd_paradas: number
+  km_estimado_motor: number | null
+  distancia_metros_google: number | null
+  km_google_maps: number | null
+  duracao_segundos_google: number | null
+  polyline_google: string | null
+  google_status: 'pendente' | 'processando' | 'ok' | 'erro' | 'sem_coordenadas' | 'sem_paradas' | 'excede_limite_waypoints' | 'reutilizada'
+  google_erro: string | null
+  request_json?: Record<string, unknown> | null
+  response_json?: Record<string, unknown> | null
+  fonte: string
+  created_at: string
+  updated_at: string
+}
+
 // --- Estado da Tela de Roteirização ---
 export type EtapaRoteirizacao =
   | 'upload'
