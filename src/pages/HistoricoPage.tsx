@@ -158,6 +158,8 @@ const temTextoIndicativo = (registro: Record<string, unknown>, termos: string[],
 
 const temAgendamento = (registro: Record<string, unknown>): boolean => {
   const registroExpandido = juntarRegistrosAninhados(registro)
+  if (isTruthyFlag(registroExpandido.agendada) || isTruthyFlag(registroExpandido.agendado)) return true
+  if (temCampoVerdadeiro(registroExpandido, ['sinalizacao_visual.agendada'])) return true
   return CAMPOS_AGENDAMENTO_DATA.some((campo) => {
     const valor = registroExpandido[campo]
     return temTextoValido(valor)
