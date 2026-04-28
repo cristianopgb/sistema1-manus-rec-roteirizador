@@ -55,6 +55,7 @@ export function DashboardPage() {
   const totalItens = rodadasFiltradas.reduce((s, r) => s + (r.total_itens_manifestados || 0), 0)
   const totalNaoRoteirizados = rodadasFiltradas.reduce((s, r) => s + (r.total_nao_roteirizados || 0), 0)
   const kmTotal = rodadasFiltradas.reduce((s, r) => s + (r.km_total_frota || 0), 0)
+  const kmMedioPorManifesto = totalManifestos > 0 ? kmTotal / totalManifestos : 0
   const ocupacaoMedia = rodadasFiltradas.length > 0
     ? rodadasFiltradas.reduce((s, r) => s + (r.ocupacao_media_percentual || 0), 0) / rodadasFiltradas.length
     : 0
@@ -100,9 +101,9 @@ export function DashboardPage() {
       bg: ocupacaoMedia >= 80 ? 'bg-green-50' : 'bg-amber-50',
     },
     {
-      label: 'KM Total Roteirizado',
-      value: `${kmTotal.toLocaleString('pt-BR')} km`,
-      sub: 'frota consolidada',
+      label: 'KM Médio por Manifesto',
+      value: `${kmMedioPorManifesto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km`,
+      sub: 'média consolidada',
       icon: MapPin,
       color: 'text-purple-700',
       bg: 'bg-purple-50',
@@ -195,10 +196,10 @@ export function DashboardPage() {
                   <thead>
                     <tr>
                       <th>Filial</th>
-                      <th className="text-right">Rodadas</th>
-                      <th className="text-right">Manifestos</th>
-                      <th className="text-right">Entregas</th>
-                      <th className="text-right">Ocup. Média</th>
+                      <th className="text-center align-middle">Rodadas</th>
+                      <th className="text-center align-middle">Manifestos</th>
+                      <th className="text-center align-middle">Entregas</th>
+                      <th className="text-center align-middle">Ocup. Média</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -211,10 +212,10 @@ export function DashboardPage() {
                         return (
                           <tr key={filial.nome}>
                             <td className="font-medium">{filial.nome}</td>
-                            <td className="text-right">{filial.rodadas}</td>
-                            <td className="text-right">{filial.manifestos.toLocaleString('pt-BR')}</td>
-                            <td className="text-right">{filial.itens.toLocaleString('pt-BR')}</td>
-                            <td className="text-right">
+                            <td className="text-center align-middle">{filial.rodadas}</td>
+                            <td className="text-center align-middle">{filial.manifestos.toLocaleString('pt-BR')}</td>
+                            <td className="text-center align-middle">{filial.itens.toLocaleString('pt-BR')}</td>
+                            <td className="text-center align-middle">
                               <span className={`font-semibold ${ocup >= 80 ? 'text-green-600' : 'text-amber-600'}`}>
                                 {ocup.toFixed(1)}%
                               </span>
@@ -256,7 +257,7 @@ export function DashboardPage() {
                       <th className="text-right">Manifestos</th>
                       <th className="text-right">Entregas</th>
                       <th className="text-right">Não Rot.</th>
-                      <th className="text-right">KM</th>
+                      <th className="text-right">KM Médio/Manifesto</th>
                       <th className="text-right">Ocupação</th>
                       <th className="text-right">Tempo</th>
                       <th>Status</th>
@@ -285,7 +286,7 @@ export function DashboardPage() {
                           {r.total_nao_roteirizados?.toLocaleString('pt-BR')}
                         </td>
                         <td className="text-right font-mono text-sm">
-                          {r.km_total_frota?.toLocaleString('pt-BR')} km
+                          {((r.total_manifestos || 0) > 0 ? (r.km_total_frota || 0) / r.total_manifestos : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km
                         </td>
                         <td className="text-right">
                           <span className={`font-semibold ${
