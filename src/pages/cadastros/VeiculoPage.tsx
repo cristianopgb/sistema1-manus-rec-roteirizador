@@ -112,12 +112,28 @@ export function VeiculoPage() {
         ativo: true,
       }
       if (editando) {
+        const [primeiraFilial, ...demaisFiliais] = form.filial_ids
         const payload = {
           ...basePayload,
-          filial_id: form.filial_ids[0],
+          filial_id: primeiraFilial,
         }
         await veiculosService.atualizar(editando.id, payload as Partial<import('@/types').Veiculo>)
-        toast.success('Veículo atualizado')
+
+        for (const filial_id of demaisFiliais) {
+          const veiculoExistente = veiculos.find((v) => v.filial_id === filial_id && v.tipo === form.tipo)
+          if (veiculoExistente) {
+            await veiculosService.atualizar(
+              veiculoExistente.id,
+              { ...basePayload, filial_id, ativo: true } as Partial<import('@/types').Veiculo>
+            )
+          } else {
+            await veiculosService.criar(
+              { ...basePayload, filial_id } as Omit<import('@/types').Veiculo, 'id' | 'created_at' | 'filial_nome'>
+            )
+          }
+        }
+
+        toast.success(`Veículo atualizado para ${form.filial_ids.length} filial(is)`)
       } else {
         const payloads = form.filial_ids.map((filial_id) => ({ ...basePayload, filial_id }))
         await veiculosService.criarEmLote(payloads as Omit<import('@/types').Veiculo, 'id' | 'created_at' | 'filial_nome'>[])
@@ -235,7 +251,7 @@ export function VeiculoPage() {
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="label">Filiais * {editando && '(na edição, somente a primeira será aplicada)'}</label>
+                  <label className="label">Filiais *</label>
                   <select
                     className="input h-32"
                     multiple
