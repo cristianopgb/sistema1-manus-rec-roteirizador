@@ -79,7 +79,7 @@ export function RotasPage() {
   const diferencaKm = (rota?.km_google_maps ?? 0) - (rota?.km_estimado_motor ?? manifestoSelecionado?.km_total ?? 0)
   const paradasAtuais = isEditingSequence ? editParadas : (rota?.paradas_json ?? [])
   const sequenceChanged = isEditingSequence && JSON.stringify(editParadas) !== JSON.stringify(rota?.paradas_json ?? [])
-  const canShowLegs = !sequenceChanged && rota?.google_status === 'ok' && (rota.legs_json?.length ?? 0) > 0
+  const canShowLegs = !sequenceChanged && ['ok', 'reutilizada'].includes(String(rota?.google_status)) && (rota?.legs_json?.length ?? 0) > 0
 
   return (
     <div className="space-y-4">
@@ -117,7 +117,7 @@ export function RotasPage() {
         <div className="bg-white border rounded-lg p-3"><div className="text-gray-500">KM Google</div><strong>{(rota?.km_google_maps ?? 0).toFixed(2)} km</strong></div>
         <div className="bg-white border rounded-lg p-3"><div className="text-gray-500">Diferença KM</div><strong>{diferencaKm.toFixed(2)} km</strong></div>
         <div className="bg-white border rounded-lg p-3"><div className="text-gray-500">Frete mínimo atual</div><strong>R$ {(manifestoSelecionado?.frete_minimo ?? 0).toFixed(2)}</strong></div>
-        <div className="bg-white border rounded-lg p-3"><div className="text-gray-500">Status Google</div><strong>{rota?.google_status ?? 'pendente'}</strong></div>
+        <div className="bg-white border rounded-lg p-3"><div className="text-gray-500">Status Google</div><strong>{rota?.google_status === 'reutilizada' ? 'Rota Google reutilizada' : (rota?.google_status ?? 'pendente')}</strong></div>
         <div className="bg-white border rounded-lg p-3"><div className="text-gray-500">Duração Google</div><strong>{formatarDuracao(rota?.duracao_segundos_google)}</strong></div>
       </div>
 

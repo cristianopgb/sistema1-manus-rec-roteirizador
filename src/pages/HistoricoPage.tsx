@@ -1344,7 +1344,7 @@ export function HistoricoPage() {
                     <div className="text-sm text-gray-600">Distância Google Maps: pendente</div>
                   ) : (
                     <div className="grid md:grid-cols-3 gap-2 text-xs">
-                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Status Google</div><div className="font-semibold">{rotaGoogleManifesto.google_status}</div></div>
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Status Google</div><div className="font-semibold">{rotaGoogleManifesto.google_status === 'reutilizada' ? 'Rota Google reutilizada' : rotaGoogleManifesto.google_status}</div></div>
                       <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">KM estimado motor</div><div className="font-semibold">{(rotaGoogleManifesto.km_estimado_motor ?? manifestoAtivo.km_total ?? 0).toFixed(2)} km</div></div>
                       <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">KM rota real Google</div><div className="font-semibold">{(rotaGoogleManifesto.km_google_maps ?? 0).toFixed(2)} km</div></div>
                       <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Diferença KM</div><div className="font-semibold">{((rotaGoogleManifesto.km_google_maps ?? 0) - (rotaGoogleManifesto.km_estimado_motor ?? manifestoAtivo.km_total ?? 0)).toFixed(2)} km</div></div>
