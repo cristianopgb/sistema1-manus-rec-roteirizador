@@ -392,7 +392,15 @@ const toBooleanLike = (value: unknown): boolean => {
   if (typeof value === 'number') return value !== 0
   const text = toText(value)?.toLowerCase()
   if (!text) return false
-  return ['1', 'true', 'sim', 's', 'yes', 'y', 'ok', 'agendado', 'exclusivo', 'restricao'].includes(text)
+  return ['1', 'true', 'sim', 's', 'yes', 'y', 'ok'].includes(text)
+}
+
+const toBooleanKeyword = (value: unknown, keywords: string[]): boolean => {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  const text = toText(value)?.toLowerCase()
+  if (!text) return false
+  return keywords.includes(text)
 }
 
 const hasNonEmptyText = (value: unknown): boolean => {
@@ -403,18 +411,18 @@ const hasNonEmptyText = (value: unknown): boolean => {
 }
 
 const temSinalizacaoExclusiva = (registro: Record<string, unknown>): boolean => {
-  return toBooleanLike(registro.exclusivo_flag)
-    || toBooleanLike(registro.veiculo_exclusivo_flag)
-    || toBooleanLike(registro.veiculo_exclusivo)
-    || toBooleanLike(registro.exclusivo)
-    || toBooleanLike(registro.carro_dedicado)
-    || toBooleanLike(registro.carro_dedicado_flag)
+  return toBooleanKeyword(registro.exclusivo_flag, ['exclusivo', 'dedicado'])
+    || toBooleanKeyword(registro.veiculo_exclusivo_flag, ['exclusivo', 'dedicado'])
+    || toBooleanKeyword(registro.veiculo_exclusivo, ['exclusivo', 'dedicado'])
+    || toBooleanKeyword(registro.exclusivo, ['exclusivo', 'dedicado'])
+    || toBooleanKeyword(registro.carro_dedicado, ['exclusivo', 'dedicado'])
+    || toBooleanKeyword(registro.carro_dedicado_flag, ['exclusivo', 'dedicado'])
 }
 
 const temSinalizacaoAgendamento = (registro: Record<string, unknown>): boolean => {
-  if (toBooleanLike(registro.agendada) || toBooleanLike(registro.agendado)) return true
+  if (toBooleanKeyword(registro.agendada, ['agendado', 'agendada']) || toBooleanKeyword(registro.agendado, ['agendado', 'agendada'])) return true
   const sinalizacaoVisual = toRecord(registro.sinalizacao_visual)
-  if (sinalizacaoVisual && toBooleanLike(sinalizacaoVisual.agendada)) return true
+  if (sinalizacaoVisual && toBooleanKeyword(sinalizacaoVisual.agendada, ['agendado', 'agendada'])) return true
   return hasNonEmptyText(registro.data_agenda)
     || hasNonEmptyText(registro.data_agendamento)
     || hasNonEmptyText(registro.dt_agendamento)
@@ -425,11 +433,11 @@ const temSinalizacaoAgendamento = (registro: Record<string, unknown>): boolean =
 }
 
 const temSinalizacaoRestricao = (registro: Record<string, unknown>): boolean => {
-  return toBooleanLike(registro.restricao)
-    || toBooleanLike(registro.restricoes)
-    || toBooleanLike(registro.restricao_veiculo)
-    || toBooleanLike(registro.cliente_com_restricao)
-    || toBooleanLike(registro.tem_restricao)
+  return toBooleanKeyword(registro.restricao, ['restricao', 'restrição'])
+    || toBooleanKeyword(registro.restricoes, ['restricao', 'restrição'])
+    || toBooleanKeyword(registro.restricao_veiculo, ['restricao', 'restrição'])
+    || toBooleanKeyword(registro.cliente_com_restricao, ['restricao', 'restrição'])
+    || toBooleanKeyword(registro.tem_restricao, ['restricao', 'restrição'])
     || String(registro.motivo ?? '').toLowerCase().includes('restri')
     || String(registro.status_triagem ?? '').toLowerCase().includes('restri')
 }
