@@ -9,7 +9,7 @@ import toast from 'react-hot-toast'
 const TIPOS_VEICULO = ['VUC', '3/4', 'TOCO', 'TRUCK', 'CARRETA', 'BITRUCK'] as const
 
 interface FormVeiculo {
-  filial_id: string
+  filial_ids: string[]
   tipo: string
   capacidade_peso_kg: string
   capacidade_volume_m3: string
@@ -21,7 +21,7 @@ interface FormVeiculo {
 }
 
 const FORM_VAZIO: FormVeiculo = {
-  filial_id: '', tipo: 'TOCO',
+  filial_ids: [], tipo: 'TOCO',
   capacidade_peso_kg: '', capacidade_volume_m3: '',
   num_eixos: '2', max_km_distancia: '', max_entregas: '',
   ocupacao_minima_perc: '70', ocupacao_maxima_perc: '100',
@@ -68,14 +68,14 @@ export function VeiculoPage() {
 
   const abrirNovo = () => {
     setEditando(null)
-    setForm({ ...FORM_VAZIO, filial_id: filiais[0]?.id || '' })
+    setForm({ ...FORM_VAZIO, filial_ids: filiais[0]?.id ? [filiais[0].id] : [] })
     setShowModal(true)
   }
 
   const abrirEditar = (v: Veiculo) => {
     setEditando(v)
     setForm({
-      filial_id: v.filial_id,
+      filial_ids: [v.filial_id],
       tipo: v.tipo,
       capacidade_peso_kg: String(v.capacidade_peso_kg),
       capacidade_volume_m3: String(v.capacidade_volume_m3),
@@ -94,14 +94,13 @@ export function VeiculoPage() {
   }
 
   const salvar = async () => {
-    if (!form.filial_id || !form.tipo) {
+    if (form.filial_ids.length === 0 || !form.tipo) {
       toast.error('Preencha todos os campos obrigatórios')
       return
     }
     setSalvando(true)
     try {
-      const payload = {
-        filial_id: form.filial_id,
+      const basePayload = {
         tipo: form.tipo as Veiculo['tipo'],
         capacidade_peso_kg: parseFloat(form.capacidade_peso_kg),
         capacidade_volume_m3: parseFloat(form.capacidade_volume_m3),
@@ -113,11 +112,16 @@ export function VeiculoPage() {
         ativo: true,
       }
       if (editando) {
+        const payload = {
+          ...basePayload,
+          filial_id: form.filial_ids[0],
+        }
         await veiculosService.atualizar(editando.id, payload as Partial<import('@/types').Veiculo>)
         toast.success('Veículo atualizado')
       } else {
-        await veiculosService.criar(payload as Omit<import('@/types').Veiculo, 'id' | 'created_at' | 'filial_nome'>)
-        toast.success('Veículo criado')
+        const payloads = form.filial_ids.map((filial_id) => ({ ...basePayload, filial_id }))
+        await veiculosService.criarEmLote(payloads as Omit<import('@/types').Veiculo, 'id' | 'created_at' | 'filial_nome'>[])
+        toast.success(`Perfil de veículo criado em ${form.filial_ids.length} filial(is)`)
       }
       setShowModal(false)
       carregar()
@@ -231,12 +235,19 @@ export function VeiculoPage() {
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="label">Filial *</label>
-                  <select className="input" value={form.filial_id}
-                    onChange={(e) => setForm({ ...form, filial_id: e.target.value })}>
-                    <option value="">Selecione...</option>
+                  <label className="label">Filiais * {editando && '(na edição, somente a primeira será aplicada)'}</label>
+                  <select
+                    className="input h-32"
+                    multiple
+                    value={form.filial_ids}
+                    onChange={(e) => {
+                      const selecionadas = Array.from(e.target.selectedOptions).map((option) => option.value)
+                      setForm({ ...form, filial_ids: selecionadas })
+                    }}
+                  >
                     {filiais.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
                   </select>
+                  <p className="text-xs text-gray-500 mt-1">Segure Ctrl (Windows) ou Cmd (Mac) para selecionar múltiplas filiais.</p>
                 </div>
                 <div>
                   <label className="label">Tipo de Veículo *</label>
