@@ -465,6 +465,14 @@ export interface ManifestoRoteirizacaoDetalhe {
   qtd_entregas: number
   qtd_clientes: number
   frete_minimo: number
+  frete_minimo_valor?: number | null
+  km_frete?: number | null
+  fonte_km_frete?: string | null
+  frete_status?: 'pendente' | 'calculado' | 'erro' | 'sem_tabela_antt' | 'sem_qtd_eixos' | 'sem_km_google' | 'calculo_manual_necessario'
+  frete_erro?: string | null
+  frete_calculado_em?: string | null
+  rota_google_id?: string | null
+  frete_minimo_detalhes_json?: Record<string, unknown> | null
   payload_apoio_json?: Record<string, unknown> | null
   created_at: string
   updated_at: string

@@ -997,7 +997,8 @@ export function HistoricoPage() {
                     <div><span className="text-gray-500 block">Ocupação</span><strong>{m.ocupacao.toFixed(1)}%</strong></div>
                     <div><span className="text-gray-500 block">Veículo/Perfil</span><strong>{m.veiculo_perfil || m.veiculo_tipo || '—'}</strong></div>
                     <div><span className="text-gray-500 block">Eixos</span><strong>{m.qtd_eixos ?? '—'}</strong></div>
-                    <div><span className="text-gray-500 block">Frete mínimo</span><strong>{formatarMoeda(m.frete_minimo)}</strong></div>
+                    <div><span className="text-gray-500 block">Frete mínimo</span><strong>{m.frete_status === 'calculado' ? formatarMoeda(m.frete_minimo_valor ?? 0) : (m.frete_status === 'calculo_manual_necessario' ? 'Manual' : m.frete_status === 'erro' ? 'Erro' : 'Não calculado')}</strong></div>
+                    <div><span className="text-gray-500 block">Status frete</span><strong>{m.frete_status || 'pendente'}</strong></div>
                     <div><span className="text-gray-500 block">Sinalização</span><span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${estiloEspecificidade[especificidade].badge}`}>{estiloEspecificidade[especificidade].legenda}</span></div>
                   </div>
                 </button>
@@ -1307,7 +1308,8 @@ export function HistoricoPage() {
               <div><span className="text-gray-500 block">KM total</span><strong>{formatarKm(manifestoAtivo.km_total)}</strong></div>
               <div><span className="text-gray-500 block">Peso total</span><strong>{formatarPeso(manifestoAtivo.peso_total)} kg</strong></div>
               <div><span className="text-gray-500 block">Qtd. entregas</span><strong>{manifestoAtivo.qtd_entregas}</strong></div>
-              <div><span className="text-gray-500 block">Frete mínimo</span><strong>{formatarMoeda(manifestoAtivo.frete_minimo)}</strong></div>
+              <div><span className="text-gray-500 block">Frete mínimo</span><strong>{manifestoAtivo.frete_status === 'calculado' ? formatarMoeda(manifestoAtivo.frete_minimo_valor ?? 0) : 'Cálculo não automático'}</strong></div>
+              <div><span className="text-gray-500 block">Status frete</span><strong>{manifestoAtivo.frete_status || 'pendente'}</strong></div>
             </div>
 
             {manifestoLoading ? <div className="text-sm text-gray-500">Carregando entregas...</div> : (
@@ -1343,11 +1345,13 @@ export function HistoricoPage() {
                   ) : (
                     <div className="grid md:grid-cols-3 gap-2 text-xs">
                       <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Status Google</div><div className="font-semibold">{rotaGoogleManifesto.google_status}</div></div>
-                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">KM Motor</div><div className="font-semibold">{(rotaGoogleManifesto.km_estimado_motor ?? manifestoAtivo.km_total ?? 0).toFixed(2)} km</div></div>
-                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">KM Google</div><div className="font-semibold">{(rotaGoogleManifesto.km_google_maps ?? 0).toFixed(2)} km</div></div>
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">KM estimado motor</div><div className="font-semibold">{(rotaGoogleManifesto.km_estimado_motor ?? manifestoAtivo.km_total ?? 0).toFixed(2)} km</div></div>
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">KM rota real Google</div><div className="font-semibold">{(rotaGoogleManifesto.km_google_maps ?? 0).toFixed(2)} km</div></div>
                       <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Diferença KM</div><div className="font-semibold">{((rotaGoogleManifesto.km_google_maps ?? 0) - (rotaGoogleManifesto.km_estimado_motor ?? manifestoAtivo.km_total ?? 0)).toFixed(2)} km</div></div>
                       <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Duração estimada</div><div className="font-semibold">{formatarDuracaoGoogle(rotaGoogleManifesto.duracao_segundos_google)}</div></div>
                       <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Fonte</div><div className="font-semibold">{rotaGoogleManifesto.fonte}</div></div>
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Status frete</div><div className="font-semibold">{manifestoAtivo.frete_status || 'pendente'}</div></div>
+                      <div className="bg-gray-50 rounded p-2 border border-gray-100"><div className="text-gray-500">Fonte KM frete</div><div className="font-semibold">{manifestoAtivo.fonte_km_frete || 'manual'}</div></div>
                       {rotaGoogleManifesto.google_status === 'erro' && (
                         <div className="md:col-span-3 bg-red-50 text-red-700 border border-red-200 rounded p-2">
                           Erro ao calcular rota: {rotaGoogleManifesto.google_erro || 'Falha não detalhada.'}

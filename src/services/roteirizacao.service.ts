@@ -40,6 +40,7 @@ const CAMPOS_DATA_RANGE: Array<{ de: keyof FiltrosCarteira; ate: keyof FiltrosCa
 
 const MOTOR_2_ROTEIRIZAR_TIMEOUT_MS = 900_000
 const MAX_CONCORRENCIA_ROTAS_GOOGLE = 2
+const MENSAGEM_MANUAL_FRETE = 'Rota Google não calculada. Frete mínimo deve ser calculado manualmente.'
 
 type RotaManifestoGoogleInput = {
   rodada_id: string
@@ -57,6 +58,8 @@ type RotaManifestoGoogleInput = {
   google_erro: string | null
   fonte: string
 }
+
+type FreteStatus = 'pendente' | 'calculado' | 'erro' | 'sem_tabela_antt' | 'sem_qtd_eixos' | 'sem_km_google' | 'calculo_manual_necessario'
 
 const normalizarCarteiraItem = (item: any): CarteiraCarga => {
   const { id, upload_id, status_validacao, erro_validacao, created_at, dados_originais_json, ...rest } = item
@@ -1239,7 +1242,12 @@ export const roteirizacaoService = {
       try {
         await this.calcularRotasGoogleRodada(rodadaId)
       } catch (error) {
-        console.warn('[GOOGLE ROUTES] falha ao calcular rotas da rodada, fluxo principal mantido', error)
+        console.warn('[GOOGLE ROUTES] falha parcial ou total; fretes sem rota Google serão marcados como cálculo manual necessário', error)
+      }
+      try {
+        await this.calcularFretesManifestosRodada(rodadaId)
+      } catch (error) {
+        console.error('[FRETE MINIMO] falha geral ao calcular fretes da rodada', error)
       }
       statusFinal = mapearStatusMotorParaStatusRodada(resposta.status, false)
     } catch (erro) {
@@ -1402,6 +1410,47 @@ export const roteirizacaoService = {
     }
   },
 
+  async atualizarFreteManifesto(rodadaId: string, manifestoId: string): Promise<FreteStatus> {
+    const [manifestoRes, rotaGoogleRes, tabelaAntt] = await Promise.all([
+      supabase.from('manifestos_roteirizacao').select('*').eq('rodada_id', rodadaId).eq('manifesto_id', manifestoId).single(),
+      supabase.from('rotas_manifestos_google').select('*').eq('rodada_id', rodadaId).eq('manifesto_id', manifestoId).maybeSingle(),
+      anttService.listar(),
+    ])
+    if (manifestoRes.error) throw manifestoRes.error
+    if (rotaGoogleRes.error) throw rotaGoogleRes.error
+    const manifesto = manifestoRes.data as ManifestoRoteirizacaoDetalhe
+    const rotaGoogle = rotaGoogleRes.data as RotaManifestoGoogle | null
+    const kmGoogle = Number(rotaGoogle?.km_google_maps ?? 0)
+    const rotaGoogleOk = rotaGoogle?.google_status === 'ok' && Number.isFinite(kmGoogle) && kmGoogle > 0
+    let payload: Record<string, unknown>
+    if (!rotaGoogleOk) {
+      payload = { frete_status: 'calculo_manual_necessario', frete_minimo_valor: null, km_frete: null, fonte_km_frete: null, rota_google_id: rotaGoogle?.id ?? null, frete_erro: MENSAGEM_MANUAL_FRETE, frete_calculado_em: null, frete_minimo_detalhes_json: { motivo: 'rota_google_indisponivel', google_status: rotaGoogle?.google_status ?? null, km_google_maps: rotaGoogle?.km_google_maps ?? null, manifesto_id: manifesto.manifesto_id }, frete_minimo: 0 }
+    } else if (!manifesto.qtd_eixos || manifesto.qtd_eixos <= 0) {
+      payload = { frete_status: 'sem_qtd_eixos', frete_minimo_valor: null, km_frete: kmGoogle, fonte_km_frete: 'google_routes_api', rota_google_id: rotaGoogle?.id ?? null, frete_erro: 'Não foi possível identificar a quantidade de eixos do veículo.', frete_calculado_em: null, frete_minimo: 0 }
+    } else {
+      const coef = tabelaAntt.find((t) => t.codigo_tipo === 5 && t.num_eixos === manifesto.qtd_eixos)
+      if (!coef) {
+        payload = { frete_status: 'sem_tabela_antt', frete_minimo_valor: null, km_frete: kmGoogle, fonte_km_frete: 'google_routes_api', rota_google_id: rotaGoogle?.id ?? null, frete_erro: 'Tabela ANTT não encontrada para os parâmetros do manifesto.', frete_calculado_em: null, frete_minimo: 0 }
+      } else {
+        const valor = anttService.calcularFreteMinimo(kmGoogle, Number(coef.coef_ccd ?? 0), Number(coef.coef_cc ?? 0))
+        payload = { frete_status: 'calculado', frete_minimo_valor: valor, km_frete: kmGoogle, fonte_km_frete: 'google_routes_api', rota_google_id: rotaGoogle?.id ?? null, frete_erro: null, frete_calculado_em: new Date().toISOString(), frete_minimo_detalhes_json: { km_utilizado: kmGoogle, fonte_km: 'google_routes_api', qtd_eixos: manifesto.qtd_eixos, tabela_antt_id: coef.id ?? null, valor_por_km: coef.coef_ccd ?? 0, valor_descarga: coef.coef_cc ?? 0, valor_total: valor }, frete_minimo: valor }
+      }
+    }
+    const status = payload.frete_status as FreteStatus
+    const { error: updateError } = await supabase.from('manifestos_roteirizacao').update(payload).eq('rodada_id', rodadaId).eq('manifesto_id', manifestoId)
+    if (updateError) throw updateError
+    console.log('[FRETE MINIMO]', { rodada_id: rodadaId, manifesto_id: manifestoId, status, km_frete: payload.km_frete ?? null, fonte_km_frete: payload.fonte_km_frete ?? null, frete_minimo_valor: payload.frete_minimo_valor ?? null })
+    return status
+  },
+
+  async calcularFretesManifestosRodada(rodadaId: string): Promise<void> {
+    const { data: manifestos, error } = await supabase.from('manifestos_roteirizacao').select('manifesto_id').eq('rodada_id', rodadaId).order('manifesto_id')
+    if (error) throw error
+    for (const manifesto of manifestos ?? []) {
+      try { await this.atualizarFreteManifesto(rodadaId, String(manifesto.manifesto_id)) } catch (err) { console.warn('[FRETE MINIMO] erro por manifesto', { rodada_id: rodadaId, manifesto_id: manifesto.manifesto_id, err }) }
+    }
+  },
+
   async montarRotaManifestoGoogle(rodadaId: string, manifestoId: string): Promise<RotaManifestoGoogleInput> {
     const [manifestoRes, itensRes, rodadaRes] = await Promise.all([
       supabase
@@ -1499,8 +1548,10 @@ export const roteirizacaoService = {
   async calcularRotaGoogleManifesto(rodadaId: string, manifestoId: string): Promise<RotaManifestoGoogle | null> {
     const rotaMontada = await this.montarRotaManifestoGoogle(rodadaId, manifestoId)
     const rotaSalva = await this.salvarOuAtualizarRotaPendente(rotaMontada)
-    if (rotaSalva.google_status === 'reutilizada') return rotaSalva
-    if (rotaSalva.google_status === 'sem_coordenadas' || rotaSalva.google_status === 'sem_paradas') return rotaSalva
+    if (rotaSalva.google_status === 'reutilizada' || rotaSalva.google_status === 'sem_coordenadas' || rotaSalva.google_status === 'sem_paradas') {
+      await this.atualizarFreteManifesto(rodadaId, manifestoId)
+      return rotaSalva
+    }
 
     const { data, error } = await supabase.functions.invoke('calcular-rota-google', {
       body: { rodada_id: rodadaId, manifesto_id: manifestoId },
@@ -1518,7 +1569,9 @@ export const roteirizacaoService = {
       return null
     }
 
-    return (data?.rota as RotaManifestoGoogle | undefined) ?? rotaSalva
+    const rotaFinal = (data?.rota as RotaManifestoGoogle | undefined) ?? rotaSalva
+    await this.atualizarFreteManifesto(rodadaId, manifestoId)
+    return rotaFinal
   },
 
   async calcularRotasGoogleRodada(rodadaId: string): Promise<void> {
@@ -1585,8 +1638,9 @@ export const roteirizacaoService = {
     const erro = resultados.find((res) => res.error)?.error
     if (erro) throw erro
 
-    try {
+      try {
       await this.calcularRotaGoogleManifesto(rodadaId, manifestoId)
+      await this.atualizarFreteManifesto(rodadaId, manifestoId)
     } catch (error) {
       await supabase
         .from('rotas_manifestos_google')
@@ -1597,6 +1651,7 @@ export const roteirizacaoService = {
         .eq('rodada_id', rodadaId)
         .eq('manifesto_id', manifestoId)
       console.warn('[GOOGLE ROUTES] falha ao recalcular após salvar ordem', error)
+      await this.atualizarFreteManifesto(rodadaId, manifestoId)
     }
   },
 
