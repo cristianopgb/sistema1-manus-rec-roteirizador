@@ -8,6 +8,7 @@ type Parada = {
   longitude?: number
   cidade?: string | null
   uf?: string | null
+  destinatarios?: string[]
 }
 
 const corsHeaders = {
@@ -31,6 +32,21 @@ const toDurationSeconds = (duration?: string): number | null => {
   if (!duration || typeof duration !== 'string') return null
   const parsed = Number(duration.replace('s', ''))
   return Number.isFinite(parsed) ? Math.round(parsed) : null
+}
+
+const formatDurationText = (seconds: number | null): string | null => {
+  if (!seconds || seconds <= 0) return null
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (h <= 0) return `${m} min`
+  return `${h}h ${String(m).padStart(2, '0')}min`
+}
+
+const formatParadaLabel = (parada: Parada & { cidade?: string | null; uf?: string | null }, ordem: number): string => {
+  const destinatario = Array.isArray(parada.destinatarios) ? parada.destinatarios.filter(Boolean)[0] : null
+  const cidadeUf = [parada.cidade, parada.uf].filter(Boolean).join(' / ')
+  if (destinatario) return cidadeUf ? `${destinatario} - ${cidadeUf}` : destinatario
+  return cidadeUf ? `Parada ${ordem} - ${cidadeUf}` : `Parada ${ordem}`
 }
 
 Deno.serve(async (req) => {
@@ -189,7 +205,7 @@ Deno.serve(async (req) => {
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline',
+        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration',
       },
       body: JSON.stringify(requestJson),
     })
@@ -211,6 +227,26 @@ Deno.serve(async (req) => {
     const distanceMeters = toNumber(route0.distanceMeters)
     const durationSeconds = toDurationSeconds(typeof route0.duration === 'string' ? route0.duration : undefined)
     const encodedPolyline = (route0.polyline as Record<string, unknown> | undefined)?.encodedPolyline
+    const routeLegs = Array.isArray(route0.legs) ? route0.legs as Array<Record<string, unknown>> : []
+    const legsJson = routeLegs.length
+      ? routeLegs.map((leg, idx) => {
+        const legDistanceMeters = toNumber(leg.distanceMeters)
+        const legDurationSeconds = toDurationSeconds(typeof leg.duration === 'string' ? leg.duration : undefined)
+        const origemParada = idx === 0 ? null : paradasValidas[idx - 1]
+        const destinoParada = paradasValidas[idx]
+        return {
+          ordem: idx + 1,
+          origem_tipo: idx === 0 ? 'filial' : 'parada',
+          origem_label: idx === 0 ? 'Filial' : formatParadaLabel(origemParada!, idx),
+          destino_tipo: 'parada',
+          destino_label: destinoParada ? formatParadaLabel(destinoParada, idx + 1) : `Parada ${idx + 1}`,
+          distance_meters: legDistanceMeters ? Math.round(legDistanceMeters) : 0,
+          distance_km: legDistanceMeters ? Number((legDistanceMeters / 1000).toFixed(3)) : 0,
+          duration_seconds: legDurationSeconds,
+          duration_text: formatDurationText(legDurationSeconds),
+        }
+      })
+      : null
 
     const { data: rotaAtualizada, error: updateError } = await supabase
       .from('rotas_manifestos_google')
@@ -220,6 +256,7 @@ Deno.serve(async (req) => {
         km_google_maps: distanceMeters ? Number((distanceMeters / 1000).toFixed(3)) : null,
         duracao_segundos_google: durationSeconds,
         polyline_google: typeof encodedPolyline === 'string' ? encodedPolyline : null,
+        legs_json: legsJson,
         request_json: requestJson,
         response_json: googleJson,
         google_erro: null,

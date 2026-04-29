@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { roteirizacaoService } from '@/services/roteirizacao.service'
-import { ManifestoRoteirizacaoDetalhe, RodadaRoteirizacao, RotaManifestoGoogle } from '@/types'
+import { ManifestoItemRoteirizacao, ManifestoRoteirizacaoDetalhe, RodadaRoteirizacao, RotaManifestoGoogle, RotaManifestoParadaGoogle } from '@/types'
 import { supabase } from '@/lib/supabase'
 import { RotaMapa } from '@/components/rotas/RotaMapa'
 
@@ -19,6 +19,10 @@ export function RotasPage() {
   const [manifestos, setManifestos] = useState<ManifestoRoteirizacaoDetalhe[]>([])
   const [rota, setRota] = useState<RotaManifestoGoogle | null>(null)
   const [loading, setLoading] = useState(false)
+  const [isEditingSequence, setIsEditingSequence] = useState(false)
+  const [editParadas, setEditParadas] = useState<RotaManifestoParadaGoogle[]>([])
+  const [isSavingSequence, setIsSavingSequence] = useState(false)
+  const [savingStep, setSavingStep] = useState<string | null>(null)
 
   const rodadaId = searchParams.get('rodada_id') ?? ''
   const manifestoId = searchParams.get('manifesto_id') ?? ''
@@ -62,6 +66,10 @@ export function RotasPage() {
   }
 
   useEffect(() => { void carregarRota() }, [rodadaId, manifestoId])
+  useEffect(() => {
+    setIsEditingSequence(false)
+    setEditParadas(rota?.paradas_json ?? [])
+  }, [rota?.id, rota?.updated_at])
 
   const manifestoSelecionado = useMemo(
     () => manifestos.find((m) => m.manifesto_id === manifestoId) ?? null,
@@ -69,6 +77,9 @@ export function RotasPage() {
   )
 
   const diferencaKm = (rota?.km_google_maps ?? 0) - (rota?.km_estimado_motor ?? manifestoSelecionado?.km_total ?? 0)
+  const paradasAtuais = isEditingSequence ? editParadas : (rota?.paradas_json ?? [])
+  const sequenceChanged = isEditingSequence && JSON.stringify(editParadas) !== JSON.stringify(rota?.paradas_json ?? [])
+  const canShowLegs = !sequenceChanged && rota?.google_status === 'ok' && (rota.legs_json?.length ?? 0) > 0
 
   return (
     <div className="space-y-4">
@@ -115,18 +126,61 @@ export function RotasPage() {
           <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-3">
             <RotaMapa
               origem={{ latitude: rota.origem_latitude, longitude: rota.origem_longitude }}
-              paradas={rota.paradas_json ?? []}
+              paradas={paradasAtuais}
               polylineGoogle={rota.polyline_google}
+              usePolylineGoogle={!sequenceChanged}
+              isPreviewRoute={sequenceChanged}
             />
           </div>
           <div className="bg-white border border-gray-200 rounded-xl p-3">
-            <h3 className="font-semibold mb-2">Paradas</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold">Paradas</h3>
+              {!isEditingSequence ? (
+                <button className="btn-secondary" onClick={() => { console.log('[ROTAS] edição de sequência iniciada', { rodada_id: rodadaId, manifesto_id: manifestoId, qtd_paradas: rota.qtd_paradas }); setIsEditingSequence(true); setEditParadas(rota.paradas_json ?? []) }}>Editar sequência</button>
+              ) : (
+                <div className="flex gap-2">
+                  <button className="btn-secondary" disabled={isSavingSequence} onClick={() => { setIsEditingSequence(false); setEditParadas(rota.paradas_json ?? []) }}>Cancelar</button>
+                  <button className="btn-primary" disabled={isSavingSequence || !sequenceChanged} onClick={async () => {
+                    if (!rodadaId || !manifestoId || !sequenceChanged) return
+                    setIsSavingSequence(true)
+                    try {
+                      console.log('[ROTAS] salvando nova sequência', { rodada_id: rodadaId, manifesto_id: manifestoId, qtd_paradas: editParadas.length })
+                      setSavingStep('Salvando nova sequência...')
+                      const { data } = await supabase.from('manifestos_itens').select('*').eq('rodada_id', rodadaId).eq('manifesto_id', manifestoId).order('sequencia')
+                      const itens = (data ?? []) as ManifestoItemRoteirizacao[]
+                      const ordemDocs = editParadas.flatMap((p) => p.documentos ?? [])
+                      const byDoc = new Map<string, ManifestoItemRoteirizacao[]>([])
+                      for (const item of itens) { const key = String(item.nro_documento ?? ''); byDoc.set(key, [...(byDoc.get(key) ?? []), item]) }
+                      const itensOrdenados = ordemDocs.flatMap((doc) => byDoc.get(String(doc)) ?? [])
+                      await roteirizacaoService.salvarOrdemManifestoItens(rodadaId, manifestoId, itensOrdenados)
+                      setSavingStep('Atualizando visualização...')
+                      await carregarRota()
+                      setIsEditingSequence(false)
+                      console.log('[ROTAS] sequência, rota e frete atualizados', { rodada_id: rodadaId, manifesto_id: manifestoId, qtd_paradas: editParadas.length, status_google: rota?.google_status, km_google_maps: rota?.km_google_maps, frete_status: manifestoSelecionado?.frete_status })
+                      toast.success('Sequência atualizada, rota e frete recalculados.')
+                    } catch {
+                      toast.error('Não foi possível recalcular a rota Google. O frete mínimo deverá ser calculado manualmente.')
+                    } finally { setSavingStep(null); setIsSavingSequence(false) }
+                  }}>Salvar e recalcular rota</button>
+                </div>
+              )}
+            </div>
+            {savingStep ? <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1 mb-2">{savingStep}</div> : null}
+            {sequenceChanged ? <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-2">Sequência alterada. Clique em Salvar e recalcular rota para atualizar KM Google, mapa e frete mínimo.</div> : null}
+            {!canShowLegs ? <div className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded px-2 py-1 mb-2">{sequenceChanged ? 'Distâncias por trecho serão atualizadas após salvar e recalcular a rota.' : 'Trechos entre paradas indisponíveis. Recalcule a rota Google.'}</div> : null}
             <ol className="space-y-2 text-sm">
-              <li className="border rounded p-2">1. Filial</li>
-              {(rota.paradas_json ?? []).map((parada) => (
-                <li key={`p-${parada.ordem}`} className="border rounded p-2">
-                  {parada.ordem + 1}. {(parada.destinatarios ?? []).join(', ') || 'Cliente'} - {parada.cidade ?? '-'} / {parada.uf ?? '-'}<br />
+              <li className="border rounded p-2"><span className="inline-block h-2 w-2 rounded-full bg-blue-600 mr-2" />Filial</li>
+              {paradasAtuais.map((parada, idx) => (
+                <li key={`p-${parada.ordem}-${idx}`} className="border rounded p-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="inline-block h-2 w-2 rounded-full bg-red-500 mr-2" />
+                      {idx + 1}. {(parada.destinatarios ?? []).join(', ') || 'Cliente'} - {parada.cidade ?? '-'} / {parada.uf ?? '-'}<br />
+                    </div>
+                    {isEditingSequence ? <div className="flex gap-1"><button className="btn-secondary px-2 py-0.5" disabled={idx===0||isSavingSequence} onClick={()=>{const arr=[...editParadas];[arr[idx-1],arr[idx]]=[arr[idx],arr[idx-1]];setEditParadas(arr);console.log('[ROTAS] sequência alterada localmente',{rodada_id:rodadaId,manifesto_id:manifestoId,qtd_paradas:arr.length})}}>↑</button><button className="btn-secondary px-2 py-0.5" disabled={idx===editParadas.length-1||isSavingSequence} onClick={()=>{const arr=[...editParadas];[arr[idx+1],arr[idx]]=[arr[idx],arr[idx+1]];setEditParadas(arr);console.log('[ROTAS] sequência alterada localmente',{rodada_id:rodadaId,manifesto_id:manifestoId,qtd_paradas:arr.length})}}>↓</button></div> : null}
+                  </div>
                   <span className="text-xs text-gray-600">Docs: {(parada.documentos ?? []).join(', ') || '—'}</span>
+                  {canShowLegs && rota.legs_json?.[idx] ? <div className="mt-1 text-xs text-blue-700">│ {rota.legs_json[idx].distance_km.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km{rota.legs_json[idx].duration_text ? ` • ${rota.legs_json[idx].duration_text}` : ''}</div> : null}
                 </li>
               ))}
             </ol>

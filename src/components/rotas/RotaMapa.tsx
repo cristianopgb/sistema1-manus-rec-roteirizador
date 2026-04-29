@@ -73,15 +73,17 @@ interface RotaMapaProps {
   origem: { latitude: number; longitude: number }
   paradas: RotaManifestoParadaGoogle[]
   polylineGoogle?: string | null
+  usePolylineGoogle?: boolean
+  isPreviewRoute?: boolean
 }
 
-export function RotaMapa({ origem, paradas, polylineGoogle }: RotaMapaProps) {
+export function RotaMapa({ origem, paradas, polylineGoogle, usePolylineGoogle = true, isPreviewRoute = false }: RotaMapaProps) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY
   const mapRef = useRef<HTMLDivElement | null>(null)
   const [apiErro, setApiErro] = useState<string | null>(null)
 
   const pontosPolyline = useMemo(() => {
-    if (!polylineGoogle) return []
+    if (!polylineGoogle || !usePolylineGoogle) return []
     try {
       return decodeGooglePolyline(polylineGoogle)
     } catch {
@@ -158,7 +160,12 @@ export function RotaMapa({ origem, paradas, polylineGoogle }: RotaMapaProps) {
 
   return (
     <div className="space-y-2">
-      {!polylineGoogle && (
+      {isPreviewRoute && (
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          Prévia aproximada da nova sequência. Rota Google ainda não recalculada.
+        </div>
+      )}
+      {!polylineGoogle && !isPreviewRoute && (
         <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
           Traçado visual aproximado; rota Google ainda não calculada.
         </div>
