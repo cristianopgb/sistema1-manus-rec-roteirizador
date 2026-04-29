@@ -1517,7 +1517,7 @@ export const roteirizacaoService = {
   async salvarOuAtualizarRotaPendente(rota: RotaManifestoGoogleInput): Promise<RotaManifestoGoogle> {
     const { data: cacheOk } = await supabase
       .from('rotas_manifestos_google')
-      .select('id, rodada_id, manifesto_id, distancia_metros_google, km_google_maps, duracao_segundos_google, polyline_google, response_json, request_json')
+      .select('id, rodada_id, manifesto_id, distancia_metros_google, km_google_maps, duracao_segundos_google, polyline_google, legs_json, response_json, request_json')
       .eq('rota_hash', rota.rota_hash)
       .eq('google_status', 'ok')
       .neq('rodada_id', rota.rodada_id)
@@ -1530,6 +1530,7 @@ export const roteirizacaoService = {
       km_google_maps: cacheOk?.km_google_maps ?? null,
       duracao_segundos_google: cacheOk?.duracao_segundos_google ?? null,
       polyline_google: cacheOk?.polyline_google ?? null,
+      legs_json: cacheOk?.legs_json ?? null,
       request_json: cacheOk?.request_json ?? null,
       response_json: cacheOk?.response_json ?? null,
       google_status: cacheOk ? 'reutilizada' : rota.google_status,

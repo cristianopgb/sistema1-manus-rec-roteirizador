@@ -548,6 +548,18 @@ export interface RotaManifestoParadaGoogle {
   documentos: string[]
 }
 
+export interface RotaManifestoLegGoogle {
+  ordem: number
+  origem_tipo: 'filial' | 'parada'
+  origem_label: string
+  destino_tipo: 'parada'
+  destino_label: string
+  distance_meters: number
+  distance_km: number
+  duration_seconds: number | null
+  duration_text: string | null
+}
+
 export interface RotaManifestoGoogle {
   id: string
   rodada_id: string
@@ -565,6 +577,7 @@ export interface RotaManifestoGoogle {
   km_google_maps: number | null
   duracao_segundos_google: number | null
   polyline_google: string | null
+  legs_json?: RotaManifestoLegGoogle[] | null
   google_status: 'pendente' | 'processando' | 'ok' | 'erro' | 'sem_coordenadas' | 'sem_paradas' | 'excede_limite_waypoints' | 'reutilizada'
   google_erro: string | null
   request_json?: Record<string, unknown> | null
