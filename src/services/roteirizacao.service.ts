@@ -43,6 +43,59 @@ const MAX_CONCORRENCIA_ROTAS_GOOGLE = 2
 const MENSAGEM_MANUAL_FRETE = 'Rota Google não calculada. Frete mínimo deve ser calculado manualmente.'
 
 
+
+type RejeicaoPersistencia = {
+  rodada_id: string
+  grupo: string
+  indice: number | null
+  motivo: string
+  severidade: 'info' | 'warning' | 'erro_nao_fatal' | 'erro_fatal'
+  item_json: Record<string, unknown> | null
+  contexto_json: Record<string, unknown> | null
+}
+
+const getFirstValue = (item: Record<string, unknown>, keys: string[]): unknown => {
+  for (const key of keys) {
+    const value = item[key]
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value
+  }
+  return null
+}
+
+const safeMapAndFilter = <TInput extends Record<string, unknown>, TOutput>({
+  grupo,
+  itens,
+  rodadaId,
+  contexto,
+  mapper,
+}: {
+  grupo: string
+  itens: TInput[]
+  rodadaId: string
+  contexto?: Record<string, unknown>
+  mapper: (item: TInput, index: number) => { value: TOutput | null; reason?: string }
+}): { validos: TOutput[]; rejeitados: RejeicaoPersistencia[] } => {
+  const validos: TOutput[] = []
+  const rejeitados: RejeicaoPersistencia[] = []
+  itens.forEach((item, index) => {
+    try {
+      const result = mapper(item, index)
+      if (result.value) {
+        validos.push(result.value)
+        return
+      }
+      const motivo = result.reason ?? 'Item sem campos mínimos para persistência'
+      console.warn('[PERSISTENCIA] item rejeitado', { rodadaId, grupo, indice: index, motivo, item })
+      rejeitados.push({ rodada_id: rodadaId, grupo, indice: index, motivo, severidade: 'warning', item_json: item, contexto_json: contexto ?? null })
+    } catch (error) {
+      const motivo = error instanceof Error ? error.message : 'Erro inesperado ao mapear item'
+      console.warn('[PERSISTENCIA] item rejeitado', { rodadaId, grupo, indice: index, motivo, item })
+      rejeitados.push({ rodada_id: rodadaId, grupo, indice: index, motivo, severidade: 'warning', item_json: item, contexto_json: contexto ?? null })
+    }
+  })
+  return { validos, rejeitados }
+}
+
 const isRotaGoogleValidaParaFrete = (rotaGoogle: RotaManifestoGoogle | null | undefined): boolean => Boolean(
   rotaGoogle &&
   ['ok', 'reutilizada'].includes(String(rotaGoogle.google_status)) &&
@@ -531,7 +584,7 @@ export const roteirizacaoService = {
     resposta: RespostaMotor,
     veiculos: Array<{ id: string; perfil?: string | null; tipo?: string | null; qtd_eixos?: number | null; capacidade_peso_kg?: number | null }>
   ): Promise<void> {
-    console.log('[PERSISTENCIA] iniciando persistência estruturada da rodada', rodadaId)
+    console.log('[PERSISTENCIA] início modo tolerante', { rodadaId })
     validarContratoM7(resposta)
     const manifestosM7 = extrairManifestosM7(resposta)
     const itensM7 = extrairItensM7(resposta)
@@ -553,25 +606,6 @@ export const roteirizacaoService = {
       naoRoteirizaveisM3: remanescentesM7.nao_roteirizaveis_m3.length,
     })
 
-    const dataBaseRoteirizacao = pickFirstText(
-      toRecord(resposta.contexto_rodada)?.data_base_roteirizacao,
-      toRecord(resposta.resumo)?.data_base_roteirizacao,
-      toRecord(resposta.resumo_negocio)?.data_base_roteirizacao,
-    )
-    const dataBaseTs = dataBaseRoteirizacao ? new Date(dataBaseRoteirizacao).getTime() : Number.NaN
-    const usarVigencia = Number.isFinite(dataBaseTs)
-
-    const { data: tabelaAnttData, error: tabelaAnttError } = await supabase
-      .from('tabela_antt')
-      .select('codigo_tipo, nome_tipo, num_eixos, coef_ccd, coef_cc, vigencia_inicio, vigencia_fim, ativa')
-      .eq('ativa', true)
-      .order('vigencia_inicio', { ascending: false })
-    if (tabelaAnttError) throw tabelaAnttError
-    const tabelaCargaGeral = (tabelaAnttData ?? []).filter((item) => {
-      const nomeTipo = normalizarPerfilVeiculo(item.nome_tipo)
-      return item.codigo_tipo === 5 || nomeTipo === 'CARGA GERAL'
-    })
-
     const [{ error: payloadManifestoProbeError }, { error: payloadItemProbeError }] = await Promise.all([
       supabase.from('manifestos_roteirizacao').select('id, payload_apoio_json').limit(1),
       supabase.from('manifestos_itens').select('id, payload_apoio_json').limit(1),
@@ -587,9 +621,16 @@ export const roteirizacaoService = {
       return acc
     }, {})
 
-    const registrosManifestos = manifestosM7.map((manifestoRaw, index) => {
-      const manifestoId = toText(manifestoRaw.manifesto_id)
-      if (!manifestoId) throw new Error(`Manifesto M7 inválido: índice ${index} sem manifesto_id`)
+    const rejeicoesPersistencia: RejeicaoPersistencia[] = []
+    const { validos: registrosManifestos, rejeitados: rejeitadosManifestos } = safeMapAndFilter({
+      grupo: 'manifestos_m7',
+      itens: manifestosM7,
+      rodadaId,
+      mapper: (manifestoRaw, index) => {
+      const manifestoId = toText(manifestoRaw.manifesto_id) ?? `MANIFESTO_SEM_ID_${String(index + 1).padStart(4, '0')}`
+      if (!toText(manifestoRaw.manifesto_id)) {
+        console.warn('[PERSISTENCIA] item rejeitado', { rodadaId, grupo: 'manifestos_m7', indice: index, motivo: 'manifesto_id ausente, gerado identificador técnico', item: manifestoRaw })
+      }
       const itensDoManifesto = itensM7PorManifesto[manifestoId] ?? []
       const exclusivoManifesto = temSinalizacaoExclusiva(manifestoRaw) || itensDoManifesto.some((item) => temSinalizacaoExclusiva(item))
       const agendamentoManifesto = temSinalizacaoAgendamento(manifestoRaw) || itensDoManifesto.some((item) => temSinalizacaoAgendamento(item))
@@ -599,77 +640,38 @@ export const roteirizacaoService = {
         ?? manifestoRaw.veiculo_perfil
         ?? manifestoRaw.veiculo_tipo
       )
-      if (!perfilManifesto) throw new Error(`Manifesto M7 inválido: manifesto_id ${manifestoId} sem perfil de veículo`)
-      if (manifestoRaw.peso_final_m6_2 === undefined || manifestoRaw.peso_final_m6_2 === null) {
-        throw new Error(`Manifesto M7 inválido: manifesto_id ${manifestoId} sem peso_final_m6_2`)
-      }
-      if (manifestoRaw.ocupacao_final_m6_2 === undefined || manifestoRaw.ocupacao_final_m6_2 === null) {
-        throw new Error(`Manifesto M7 inválido: manifesto_id ${manifestoId} sem ocupacao_final_m6_2`)
-      }
-      if (manifestoRaw.km_total_estimado_m6_2 === undefined || manifestoRaw.km_total_estimado_m6_2 === null) {
-        throw new Error(`Manifesto M7 inválido: manifesto_id ${manifestoId} sem km_total_estimado_m6_2`)
-      }
+      if (!perfilManifesto) return { value: null, reason: `Manifesto ${manifestoId} sem perfil de veículo` }
 
       const veiculoCadastro = veiculos.find((veiculo) => {
         return normalizarPerfilVeiculo(veiculo.perfil ?? veiculo.tipo) === normalizarPerfilVeiculo(perfilManifesto)
       })
-      if (!veiculoCadastro) {
-        throw new Error(`Não foi possível resolver qtd_eixos: perfil ${perfilManifesto} não encontrado no cadastro de veículos`)
-      }
-      const qtdEixos = Math.trunc(toNumber(veiculoCadastro.qtd_eixos, Number.NaN))
-      if (!Number.isFinite(qtdEixos) || qtdEixos <= 0) {
-        throw new Error(`Não foi possível resolver qtd_eixos: perfil ${perfilManifesto} possui qtd_eixos inválido no cadastro de veículos`)
-      }
-
-      const kmTotal = toNumber(manifestoRaw.km_total_estimado_m6_2, Number.NaN)
-      const coeficientesCargaGeral = tabelaCargaGeral.filter((item) => item.num_eixos === qtdEixos)
-      let coeficienteFrete = coeficientesCargaGeral[0]
-      if (usarVigencia) {
-        coeficienteFrete = coeficientesCargaGeral.find((item) => {
-          const inicio = new Date(item.vigencia_inicio).getTime()
-          if (!Number.isFinite(inicio) || inicio > dataBaseTs) return false
-          if (!item.vigencia_fim) return true
-          const fim = new Date(item.vigencia_fim).getTime()
-          return Number.isFinite(fim) ? fim >= dataBaseTs : true
-        }) ?? coeficientesCargaGeral[0]
-      }
-
-      if (kmTotal > 0 && qtdEixos > 0 && !coeficienteFrete) {
-        throw new Error(`Tabela de frete mínimo não encontrada para Carga geral, ${qtdEixos} eixos`)
-      }
-
-      const deslocamentoRsKm = toNumber(coeficienteFrete?.coef_ccd, 0)
-      const cargaDescargaRs = toNumber(coeficienteFrete?.coef_cc, 0)
-      const freteMinimo = roundCurrency((kmTotal * deslocamentoRsKm) + cargaDescargaRs)
-
-      if (kmTotal > 0 && qtdEixos > 0 && (!Number.isFinite(freteMinimo) || freteMinimo <= 0)) {
-        throw new Error(`Frete mínimo inválido para manifesto ${manifestoId}: km_total=${kmTotal}, qtd_eixos=${qtdEixos}, deslocamento=${deslocamentoRsKm}, carga_descarga=${cargaDescargaRs}`)
-      }
+      const qtdEixosRaw = veiculoCadastro?.qtd_eixos
+      const qtdEixos = Number.isFinite(toNumber(qtdEixosRaw, Number.NaN))
+        ? Math.trunc(toNumber(qtdEixosRaw, Number.NaN))
+        : null
+      const kmTotal = toNumber(manifestoRaw.km_total_estimado_m6_2, 0)
       if (index === 0) {
-        console.log('[FRETE MINIMO] exemplo', {
+        console.log('[PERSISTENCIA] manifesto operacional', {
           manifestoId,
           perfilManifesto,
           qtdEixos,
           kmTotal,
-          deslocamentoRsKm,
-          cargaDescargaRs,
-          freteMinimo,
         })
       }
 
-      return {
+      return { value: {
         rodada_id: rodadaId,
         manifesto_id: manifestoId,
         veiculo_perfil: perfilManifesto,
         veiculo_tipo: perfilManifesto,
-        qtd_eixos: Math.trunc(qtdEixos),
+        qtd_eixos: qtdEixos,
         exclusivo_flag: exclusivoManifesto,
         peso_total: toNumber(manifestoRaw.peso_final_m6_2, Number.NaN),
         ocupacao: toNumber(manifestoRaw.ocupacao_final_m6_2, Number.NaN),
         km_total: kmTotal,
         qtd_entregas: Math.trunc(toNumber(manifestoRaw.qtd_itens_final_m6_2, 0)),
         qtd_clientes: Math.trunc(toNumber(manifestoRaw.qtd_paradas_final_m6_2, 0)),
-        frete_minimo: freteMinimo,
+        frete_minimo: null,
         origem_modulo: pickFirstText(manifestoRaw.origem_manifesto_modulo),
         tipo_manifesto: pickFirstText(manifestoRaw.origem_manifesto_tipo),
         ...(inserirPayloadManifesto ? {
@@ -682,33 +684,36 @@ export const roteirizacaoService = {
             },
           },
         } : {}),
-      }
-    })
-    console.log('[FRETE MINIMO] calculados', {
+      }}
+    }})
+    rejeicoesPersistencia.push(...rejeitadosManifestos)
+    console.log('[PERSISTENCIA] manifestos preparados', {
       totalManifestos: registrosManifestos.length,
       comQtdEixos: registrosManifestos.filter((m) => Number(m.qtd_eixos) > 0).length,
-      comFreteMinimo: registrosManifestos.filter((m) => Number(m.frete_minimo) > 0).length,
     })
 
-    const registrosItens = itensM7.map((item, index) => {
+    const { validos: registrosItens, rejeitados: rejeitadosItens } = safeMapAndFilter({
+      grupo: 'itens_manifestos_sequenciados_m7',
+      itens: itensM7,
+      rodadaId,
+      mapper: (item, index) => {
       const manifestoId = toText(item.manifesto_id)
-      if (!manifestoId) throw new Error(`Item M7 inválido: id_linha_pipeline ${toText(item.id_linha_pipeline) ?? `indice_${index}`} sem manifesto_id`)
       const idLinhaPipeline = toText(item.id_linha_pipeline)
-      if (!idLinhaPipeline) throw new Error(`Item M7 inválido: índice ${index} sem id_linha_pipeline`)
+      if (!manifestoId || !idLinhaPipeline) return { value: null, reason: 'Item sem manifesto_id ou id_linha_pipeline' }
       const obrigatorios = ['nro_documento', 'destinatario', 'cidade', 'uf', 'peso_calculado', 'ordem_entrega_doc_m7', 'ordem_carregamento_doc_m7'] as const
       for (const campo of obrigatorios) {
         if (item[campo] === undefined || item[campo] === null || (typeof item[campo] === 'string' && String(item[campo]).trim() === '')) {
-          throw new Error(`Item M7 inválido: id_linha_pipeline ${idLinhaPipeline} sem ${campo}`)
+          return { value: null, reason: `Item sem ${campo}` }
         }
       }
       const ordemParadaM7 = item.ordem_parada_m7 ?? item.ordem_entrega_parada_m7
       if (ordemParadaM7 === undefined || ordemParadaM7 === null || String(ordemParadaM7).trim() === '') {
-        throw new Error(`Item M7 inválido: id_linha_pipeline ${idLinhaPipeline} sem ordem_parada_m7 ou ordem_entrega_parada_m7`)
+        return { value: null, reason: 'Item sem ordem_parada_m7/ordem_entrega_parada_m7' }
       }
       const exclusivoItem = temSinalizacaoExclusiva(item)
       const agendamentoItem = temSinalizacaoAgendamento(item)
       const restricaoItem = temSinalizacaoRestricao(item)
-      return {
+      return { value: {
         rodada_id: rodadaId,
         manifesto_id: manifestoId,
         sequencia: Math.trunc(toNumber(item.ordem_entrega_doc_m7, Number.NaN)),
@@ -744,8 +749,9 @@ export const roteirizacaoService = {
         } : {}),
         latitude: pickFirstNumber(item.latitude_destinatario),
         longitude: pickFirstNumber(item.longitude_destinatario),
-      }
-    })
+      }}
+    }})
+    rejeicoesPersistencia.push(...rejeitadosItens)
 
     const toTextRemanescente = (valor: unknown): string => {
       return String(valor ?? '').trim()
@@ -762,16 +768,18 @@ export const roteirizacaoService = {
       .limit(1)
     const inserirPayloadApoio = !payloadApoioProbeError
 
-    const registrosNaoRoteirizaveisM3 = remanescentesM7.nao_roteirizaveis_m3.map((item, index) => {
-      const nroDocumento = toTextRemanescente(item.nro_documento)
-      const destinatario = toTextRemanescente(item.destinatario)
-      const cidade = toTextRemanescente(item.cidade)
-      const uf = toTextRemanescente(item.uf)
-      const motivoTriagem = toTextRemanescente(item.motivo_triagem)
+    const { validos: registrosNaoRoteirizaveisM3, rejeitados: rejeitadosNaoRoteirizaveis } = safeMapAndFilter({
+      grupo: 'remanescentes.nao_roteirizaveis_m3',
+      itens: remanescentesM7.nao_roteirizaveis_m3,
+      rodadaId,
+      mapper: (item) => {
+      const nroDocumento = toTextRemanescente(getFirstValue(item, ['nro_documento', 'documento', 'nro_doc', 'numero_documento', 'Nro Doc.', 'doc', 'nf', 'nota_fiscal']))
+      const destinatario = toTextRemanescente(getFirstValue(item, ['destinatario', 'destinatário', 'cliente', 'nome_cliente', 'razao_social_destinatario', 'Destina', 'destina']))
+      const cidade = toTextRemanescente(getFirstValue(item, ['cidade', 'cidade_destino', 'cidade_destinatario', 'Cidade Dest.', 'Cida', 'cida']))
+      const uf = toTextRemanescente(getFirstValue(item, ['uf', 'uf_destino', 'uf_destinatario', 'UF']))
+      const motivoTriagem = toTextRemanescente(getFirstValue(item, ['motivo', 'motivo_triagem', 'status_triagem', 'motivo_nao_roteirizado', 'regra', 'observacao', 'observação']))
       const statusTriagem = toTextRemanescente(item.status_triagem)
-      if (!nroDocumento || !destinatario || !cidade || !uf) {
-        throw new Error(`Remanescente M7 inválido (nao_roteirizaveis_m3): índice ${index} sem campos mínimos`)
-      }
+      if (!nroDocumento && !destinatario && !cidade && !motivoTriagem) return { value: null, reason: 'Item sem campos mínimos para remanescente M3' }
       const registroBase = {
         rodada_id: rodadaId,
         tipo_remanescente: 'nao_roteirizavel_triagem',
@@ -789,10 +797,15 @@ export const roteirizacaoService = {
         motivo: motivoTriagem || statusTriagem || 'Não roteirizável na triagem',
         etapa_origem: 'm3_triagem',
       }
-      return inserirPayloadApoio ? { ...registroBase, payload_apoio_json: item } : registroBase
-    })
+      return { value: inserirPayloadApoio ? { ...registroBase, payload_apoio_json: item } : registroBase }
+    }})
+    rejeicoesPersistencia.push(...rejeitadosNaoRoteirizaveis)
 
-    const registrosSaldoFinal = remanescentesM7.saldo_final_roteirizacao.map((item, index) => {
+    const { validos: registrosSaldoFinal, rejeitados: rejeitadosSaldoFinal } = safeMapAndFilter({
+      grupo: 'remanescentes.saldo_final_roteirizacao',
+      itens: remanescentesM7.saldo_final_roteirizacao,
+      rodadaId,
+      mapper: (item) => {
       const nroDocumento = toTextRemanescente(item.nro_documento)
       const destinatario = toTextRemanescente(item.destinatario)
       const cidade = toTextRemanescente(item.cidade)
@@ -802,9 +815,7 @@ export const roteirizacaoService = {
       const motivoFinalM54 = toTextRemanescente(item.motivo_final_remanescente_m5_4)
       const motivoFinalM53 = toTextRemanescente(item.motivo_final_remanescente_m5_3)
       const motivoExistente = toTextRemanescente(item.motivo)
-      if (!nroDocumento || !destinatario || !cidade || !uf) {
-        throw new Error(`Remanescente M7 inválido (saldo_final_roteirizacao): índice ${index} sem campos mínimos`)
-      }
+      if (!nroDocumento && !destinatario && !cidade && !motivoExistente) return { value: null, reason: 'Item sem campos mínimos para saldo final' }
       const registroBase = {
         rodada_id: rodadaId,
         tipo_remanescente: 'roteirizavel_saldo_final',
@@ -831,8 +842,9 @@ export const roteirizacaoService = {
           'Saldo final da roteirização',
         etapa_origem: 'saldo_final_roteirizacao',
       }
-      return inserirPayloadApoio ? { ...registroBase, payload_apoio_json: item } : registroBase
-    })
+      return { value: inserirPayloadApoio ? { ...registroBase, payload_apoio_json: item } : registroBase }
+    }})
+    rejeicoesPersistencia.push(...rejeitadosSaldoFinal)
     const registrosRemanescentes = [...registrosNaoRoteirizaveisM3, ...registrosSaldoFinal]
     console.log('[PERSISTENCIA] remanescentes preparados:', registrosRemanescentes.length)
     console.log('[PERSISTENCIA M7] remanescentes preparados', {
@@ -871,20 +883,9 @@ export const roteirizacaoService = {
     }
     const totalRemanescentesSalvos = registrosRemanescentes.length
     console.log('[PERSISTENCIA] remanescentes salvos:', totalRemanescentesSalvos)
-    if (!Number.isFinite(registrosManifestos.reduce((acc, manifesto) => acc + toNumber(manifesto.peso_total, Number.NaN), 0))) {
-      throw new Error('Manifesto M7 inválido: peso_final_m6_2 deve ser numérico em todos os manifestos')
-    }
-    if (!Number.isFinite(registrosManifestos.reduce((acc, manifesto) => acc + toNumber(manifesto.km_total, Number.NaN), 0))) {
-      throw new Error('Manifesto M7 inválido: km_total_estimado_m6_2 deve ser numérico em todos os manifestos')
-    }
-    if (!Number.isFinite(registrosManifestos.reduce((acc, manifesto) => acc + toNumber(manifesto.ocupacao, Number.NaN), 0))) {
-      throw new Error('Manifesto M7 inválido: ocupacao_final_m6_2 deve ser numérico em todos os manifestos')
-    }
-    if (!Number.isFinite(registrosItens.reduce((acc, item) => acc + toNumber(item.sequencia, Number.NaN), 0))) {
-      throw new Error('Item M7 inválido: ordem_entrega_doc_m7 deve ser numérico em todos os itens')
-    }
-    if (!Number.isFinite(registrosItens.reduce((acc, item) => acc + toNumber(item.peso, Number.NaN), 0))) {
-      throw new Error('Item M7 inválido: peso_calculado deve ser numérico em todos os itens')
+    if (rejeicoesPersistencia.length > 0) {
+      const { error: rejeicoesError } = await supabase.from('roteirizacao_persistencia_rejeicoes').insert(rejeicoesPersistencia)
+      if (rejeicoesError) console.warn('[PERSISTENCIA] falha ao registrar rejeições', rejeicoesError)
     }
     const resumoNegocio = toRecord(resposta.resumo_negocio)
     const respostaRecord = resposta as unknown as Record<string, unknown>
@@ -914,16 +915,14 @@ export const roteirizacaoService = {
       ? registrosManifestos.reduce((acc, manifesto) => acc + toNumber(manifesto.ocupacao, 0), 0) / totalManifestos
       : 0
 
-    if (totalManifestosSalvos !== manifestosM7.length) {
-      throw new Error(`Integridade M7 inválida: manifestos salvos ${totalManifestosSalvos} diferente de manifestos_m7 ${manifestosM7.length}`)
-    }
-    if (totalItensSalvos !== itensM7.length) {
-      throw new Error(`Integridade M7 inválida: itens salvos ${totalItensSalvos} diferente de itens_manifestos_sequenciados_m7 ${itensM7.length}`)
-    }
     const remanescentesEsperados = remanescentesM7.nao_roteirizaveis_m3.length + remanescentesM7.saldo_final_roteirizacao.length
-    if (totalRemanescentesSalvos !== remanescentesEsperados) {
-      throw new Error(`Integridade M7 inválida: remanescentes salvos ${totalRemanescentesSalvos} diferente do esperado ${remanescentesEsperados}`)
+    const resumoPersistencia = {
+      manifestos: { recebidos: manifestosM7.length, salvos: totalManifestosSalvos, rejeitados: manifestosM7.length - totalManifestosSalvos },
+      itens_manifestos: { recebidos: itensM7.length, salvos: totalItensSalvos, rejeitados: itensM7.length - totalItensSalvos },
+      remanescentes: { recebidos: remanescentesEsperados, salvos: totalRemanescentesSalvos, rejeitados: remanescentesEsperados - totalRemanescentesSalvos },
+      rejeicoes_total: rejeicoesPersistencia.length,
     }
+    console.log('[PERSISTENCIA] resumo', resumoPersistencia)
 
     const registroEstatistica = {
       rodada_id: rodadaId,
@@ -955,6 +954,7 @@ export const roteirizacaoService = {
         ocupacao_media_percentual: ocupacaoMediaRodada,
         tempo_processamento_ms: tempoExecucaoMs,
         resposta_motor: resposta as unknown as Record<string, unknown>,
+        resumo_persistencia_json: resumoPersistencia,
         erro_mensagem: null,
       })
       .eq('id', rodadaId)
@@ -968,6 +968,7 @@ export const roteirizacaoService = {
     })
     void resumoSequenciamentoM7
     console.log('[PERSISTENCIA] estatisticas salvas para rodada:', rodadaId)
+    console.log('[ROTEIRIZACAO] persistência tolerante concluída', { rodadaId, rejeicoes_total: rejeicoesPersistencia.length })
   },
 
   async buscarCarteiraFiltrada(uploadId: string, filtros?: FiltrosCarteira): Promise<CarteiraCarga[]> {

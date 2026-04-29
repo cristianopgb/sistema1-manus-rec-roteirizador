@@ -433,6 +433,10 @@ export function HistoricoPage() {
       filial: rodadaSelecionada.filial_nome || '—',
     }
   }, [rodadaSelecionada])
+  const resumoPersistenciaSelecionada = useMemo(() => {
+    if (!rodadaSelecionada) return null
+    return (rodadaSelecionada as unknown as Record<string, unknown>).resumo_persistencia_json as Record<string, unknown> | null
+  }, [rodadaSelecionada])
 
   const alterarSequencia = (indexAtual: number, direcao: -1 | 1) => {
     const destino = indexAtual + direcao
@@ -962,6 +966,17 @@ export function HistoricoPage() {
             <h2 className="text-lg font-semibold text-gray-900">Rodada selecionada</h2>
             <p className="text-sm text-gray-500">Data: {rodadaSelecionadaResumo?.data} · Filial: {rodadaSelecionadaResumo?.filial}</p>
           </div>
+          {resumoPersistenciaSelecionada && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+              <p className="font-semibold text-amber-900">Alertas de persistência</p>
+              <div className="mt-1 text-amber-800 space-y-1">
+                <p>Total rejeitado: {Number((resumoPersistenciaSelecionada.rejeicoes_total ?? 0))}</p>
+                <p>Manifestos rejeitados: {Number(((resumoPersistenciaSelecionada.manifestos as Record<string, unknown> | undefined)?.rejeitados ?? 0))}</p>
+                <p>Itens rejeitados: {Number(((resumoPersistenciaSelecionada.itens_manifestos as Record<string, unknown> | undefined)?.rejeitados ?? 0))}</p>
+                <p>Remanescentes rejeitados: {Number(((resumoPersistenciaSelecionada.remanescentes as Record<string, unknown> | undefined)?.rejeitados ?? 0))}</p>
+              </div>
+            </div>
+          )}
           <div className="flex gap-2">
             {[
               { key: 'manifestos', label: `Manifestos (${manifestos.length})` },
