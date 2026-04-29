@@ -52,6 +52,18 @@ export const veiculosService = {
     return data as Veiculo
   },
 
+  async criarEmLote(veiculos: Omit<Veiculo, 'id' | 'created_at' | 'filial_nome'>[]): Promise<Veiculo[]> {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('veiculos')
+        .insert(veiculos)
+        .select(),
+      'Cadastro em lote de veículos'
+    )
+    if (error) throw error
+    return (data || []) as Veiculo[]
+  },
+
   async atualizar(id: string, veiculo: Partial<Veiculo>): Promise<Veiculo> {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { filial_nome: _, ...payload } = veiculo
