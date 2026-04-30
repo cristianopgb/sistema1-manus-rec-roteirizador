@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AlertTriangle, Clock, Calendar, XCircle, HelpCircle } from 'lucide-react'
 import { RespostaMotor } from '@/types'
+import { formatDateBR } from '@/lib/date-normalizers'
 
 interface Props {
   resposta: RespostaMotor
@@ -101,7 +102,7 @@ export function NaoRoteirizadosPanel({ resposta }: Props) {
                     </td>
                     <td className="text-xs text-gray-500">
                       {carga.data_limite_entrega
-                        ? new Date(String(carga.data_limite_entrega)).toLocaleDateString('pt-BR')
+                        ? formatDateBR(carga.data_limite_entrega)
                         : '—'}
                     </td>
                   </tr>

@@ -29,7 +29,45 @@ const excelSerialToDate = (serial: number): Date => {
   return new Date(EXCEL_EPOCH_UTC_MS + serial * MS_PER_DAY)
 }
 
+const isNullLikeDateText = (text: string): boolean => {
+  const normalized = text.trim().toLowerCase()
+  return ['', '-', 'nenhum', 'nan', 'nat', 'null', 'undefined'].includes(normalized)
+}
+
+const parseIsoDateText = (text: string): Date | null => {
+  const isoDate = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const isoDateTime = text.match(/^(\d{4})-(\d{2})-(\d{2})[t\s](\d{2}):(\d{2})(?::(\d{2}))?$/i)
+  if (!isoDate && !isoDateTime) return null
+
+  const [, yyyy, mm, dd, hh = '00', min = '00', sec = '00'] = isoDateTime ?? [...isoDate!, '00', '00', '00']
+  const date = new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(sec)))
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+const parseBrDateText = (text: string): Date | null => {
+  const brDateTime = text.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/
+  )
+  if (!brDateTime) return null
+
+  const [, dd, mm, yyyy, hh = '0', min = '0', sec = '0'] = brDateTime
+  const date = new Date(
+    Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(sec))
+  )
+  if (Number.isNaN(date.getTime())) return null
+
+  if (
+    date.getUTCFullYear() !== Number(yyyy)
+    || date.getUTCMonth() !== Number(mm) - 1
+    || date.getUTCDate() !== Number(dd)
+  ) return null
+
+  return date
+}
+
 const parseDateFromUnknown = (value: unknown): Date | null => {
+  if (value === null || value === undefined) return null
+
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value
 
   const serial = maybeExcelSerial(value)
@@ -37,20 +75,18 @@ const parseDateFromUnknown = (value: unknown): Date | null => {
 
   const text = toTrimmedText(value)
   if (!text) return null
+  if (isNullLikeDateText(text)) return null
+
+  const isoParsed = parseIsoDateText(text)
+  if (isoParsed) return isoParsed
+
+  const brParsed = parseBrDateText(text)
+  if (brParsed) return brParsed
+
+  if (text.includes('/')) return null
 
   const parsed = new Date(text)
   if (!Number.isNaN(parsed.getTime())) return parsed
-
-  const brDateTime = text.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/
-  )
-  if (brDateTime) {
-    const [, dd, mm, yyyy, hh = '0', min = '0', sec = '0'] = brDateTime
-    const date = new Date(
-      Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(sec))
-    )
-    return Number.isNaN(date.getTime()) ? null : date
-  }
 
   return null
 }
@@ -89,4 +125,9 @@ export const normalizeDle = (value: unknown): string | null => {
 export const normalizeAgendam = (value: unknown): string | null => {
   const parsed = parseDateFromUnknown(value)
   return parsed ? formatBrDateTime(parsed) : null
+}
+
+export const formatDateBR = (value: unknown): string => {
+  const parsed = parseDateFromUnknown(value)
+  return parsed ? formatBrDate(parsed) : '—'
 }

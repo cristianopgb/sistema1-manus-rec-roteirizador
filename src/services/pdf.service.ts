@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { ManifestoComFrete, ManifestoItemRoteirizacao, ManifestoRoteirizacaoDetalhe } from '@/types'
+import { formatDateBR } from '@/lib/date-normalizers'
 
 const temTextoValido = (value: unknown): boolean => {
   if (typeof value !== 'string') return false
@@ -160,7 +161,7 @@ export async function gerarPdfManifesto(manifesto: ManifestoComFrete): Promise<v
       body: manifesto.agendamentos.map((a) => [
         a.destinatario || '—',
         `${a.cidade || '—'} / ${a.uf || '—'}`,
-        a.data_agenda ? new Date(a.data_agenda).toLocaleDateString('pt-BR') : '—',
+        a.data_agenda ? formatDateBR(a.data_agenda) : '—',
         a.hora_agenda || '—',
         a.nro_documento || '—',
       ]),
@@ -192,7 +193,7 @@ export async function gerarPdfManifesto(manifesto: ManifestoComFrete): Promise<v
         ? e.valor_mercadoria.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
         : '—',
       e.data_limite_entrega
-        ? new Date(e.data_limite_entrega).toLocaleDateString('pt-BR')
+        ? formatDateBR(e.data_limite_entrega)
         : '—',
       e.folga_dias != null ? `${e.folga_dias.toFixed(0)}d` : '—',
     ]),
