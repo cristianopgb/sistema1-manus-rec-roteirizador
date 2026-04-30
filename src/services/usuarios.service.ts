@@ -41,23 +41,37 @@ export const usuariosService = {
     filial_id: string | null
     password: string
   }): Promise<{ user: UserProfile | null; error: Error | null }> {
+    const { data: signUpData, error: signUpError } = await withTimeout(
+      supabase.auth.signUp({
+        email: usuario.email,
+        password: usuario.password,
+      }),
+      'Cadastro de autenticação'
+    )
+
+    if (signUpError || !signUpData.user?.id) {
+      console.error('[usuarios.service:criar] Falha ao criar autenticação', { email: usuario.email, signUpError })
+      return { user: null, error: (signUpError as unknown as Error) || new Error('Não foi possível criar autenticação do usuário.') }
+    }
+
     const { data, error } = await withTimeout(
       supabase
         .from('usuarios_perfil')
-        .insert({
+        .update({
           email: usuario.email,
           nome: usuario.nome,
           perfil: usuario.perfil,
           filial_id: usuario.filial_id,
           ativo: true,
         })
+        .eq('id', signUpData.user.id)
         .select()
         .single(),
-      'Cadastro de usuário'
+      'Atualização do perfil de usuário'
     )
 
     if (error) {
-      console.error('[usuarios.service:criar] Falha ao criar usuário', { email: usuario.email, error })
+      console.error('[usuarios.service:criar] Falha ao atualizar perfil do usuário criado', { email: usuario.email, error })
       return { user: null, error: error as unknown as Error }
     }
 
