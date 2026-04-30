@@ -57,17 +57,17 @@ export const usuariosService = {
     const { data, error } = await withTimeout(
       supabase
         .from('usuarios_perfil')
-        .update({
+        .upsert({
+          id: signUpData.user.id,
           email: usuario.email,
           nome: usuario.nome,
           perfil: usuario.perfil,
           filial_id: usuario.filial_id,
           ativo: true,
-        })
-        .eq('id', signUpData.user.id)
+        }, { onConflict: 'id' })
         .select()
         .single(),
-      'Atualização do perfil de usuário'
+      'Criação/atualização do perfil de usuário'
     )
 
     if (error) {
