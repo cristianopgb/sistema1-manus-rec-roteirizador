@@ -197,12 +197,14 @@ const mapVeiculoToMotor = (veiculo: Record<string, unknown>) => ({
 })
 
 const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): CarteiraCargaContratoMotor => {
+  const agendamOriginal = getFirstValue(item as unknown as Record<string, unknown>, ['agendam', 'Agendam.', 'data_agenda', 'agenda'])
+  const dleOriginal = getFirstValue(item as unknown as Record<string, unknown>, ['dle', 'D.L.E.', 'data_leadtime', 'data_limite', 'data_limite_entrega'])
   const inicioEntregaNormalizado = normalizeHorarioJanela(item.inicio_entrega)
   const fimEnNormalizado = normalizeHorarioJanela(item.fim_entrega)
   const dataDesNormalizada = normalizeDataDesDataNF(item.data_des)
   const dataNFNormalizada = normalizeDataDesDataNF(item.data_nf)
-  const dleNormalizada = normalizeDle(item.dle)
-  const agendamNormalizada = normalizeAgendam(item.agendam)
+  const dleNormalizada = normalizeDle(dleOriginal)
+  const agendamNormalizada = normalizeAgendam(agendamOriginal)
   const peso = toPayloadNumber(item.peso)
   const pesoCalculo = toPayloadNumber(item.peso_calculo)
   const valorMercadoria = toPayloadNumber(item.vlr_merc)
@@ -228,11 +230,17 @@ const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): Car
         dataDesNormalizada,
         dataNFOriginal: item.data_nf,
         dataNFNormalizada,
-        dleOriginal: item.dle,
+        dleOriginal,
         dleNormalizada,
-        agendamOriginal: item.agendam,
+        agendamOriginal,
         agendamNormalizada,
       })
+    }
+    if (agendamOriginal !== null && agendamOriginal !== undefined) {
+      console.log(`[DATA PAYLOAD] campo=Agendam. original=${String(agendamOriginal)} normalizado=${agendamNormalizada ?? 'null'}`)
+    }
+    if (dleOriginal !== null && dleOriginal !== undefined) {
+      console.log(`[DATA PAYLOAD] campo=D.L.E. original=${String(dleOriginal)} normalizado=${dleNormalizada ?? 'null'}`)
     }
   }
 

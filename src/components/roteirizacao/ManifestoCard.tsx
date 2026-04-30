@@ -7,6 +7,7 @@ import {
 import { ManifestoComFrete } from '@/types'
 import { gerarPdfManifesto } from '@/services/pdf.service'
 import toast from 'react-hot-toast'
+import { formatDateBR } from '@/lib/date-normalizers'
 
 interface Props {
   manifesto: ManifestoComFrete
@@ -191,7 +192,7 @@ export function ManifestoCard({ manifesto, onAprovar, onExcluir }: Props) {
                     </td>
                     <td className="whitespace-nowrap text-xs">
                       {entrega.data_limite_entrega
-                        ? new Date(entrega.data_limite_entrega).toLocaleDateString('pt-BR')
+                        ? formatDateBR(entrega.data_limite_entrega)
                         : '—'}
                     </td>
                     <td>
