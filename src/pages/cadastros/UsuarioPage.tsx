@@ -77,6 +77,10 @@ export function UsuarioPage() {
       toast.error('Preencha e-mail e nome')
       return
     }
+    if (!editando && form.password.length < 8) {
+      toast.error('A senha provisória deve ter pelo menos 8 caracteres')
+      return
+    }
     if (form.perfil === 'roteirizador' && !form.filial_id) {
       toast.error('Roteirizador precisa de uma filial')
       return
@@ -99,7 +103,7 @@ export function UsuarioPage() {
           password: form.password,
         })
         if (error) throw error
-        toast.success('Usuário criado. Configure a senha no Supabase Dashboard.')
+        toast.success('Usuário criado com senha provisória. Oriente o usuário a trocar a senha no primeiro acesso.')
       }
       setShowModal(false)
       void carregar()
@@ -241,8 +245,16 @@ export function UsuarioPage() {
                 </div>
               )}
               {!editando && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700">
-                  <strong>Atenção:</strong> Após criar o usuário aqui, acesse o Supabase Dashboard → Authentication → Users para definir a senha de acesso.
+                <div>
+                  <label className="label">Senha provisória *</label>
+                  <input
+                    className="input"
+                    type="password"
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    placeholder="Mínimo 8 caracteres"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">O usuário poderá alterar essa senha no ícone de perfil no canto superior direito.</p>
                 </div>
               )}
             </div>
