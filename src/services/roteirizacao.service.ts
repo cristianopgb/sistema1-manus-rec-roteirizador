@@ -510,6 +510,13 @@ const temSinalizacaoRestricao = (registro: Record<string, unknown>): boolean => 
     || String(registro.status_triagem ?? '').toLowerCase().includes('restri')
 }
 
+const getDataAgendaRawItem = (item: Record<string, unknown>): string | null => {
+  const value = getFirstValue(item, ['data_agenda', 'data_agendamento', 'dt_agendamento', 'data_programada', 'agendam', 'Agendam.', 'agenda'])
+  if (value === null || value === undefined) return null
+  const text = String(value).trim()
+  return text.length ? text : null
+}
+
 const toRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   return value as Record<string, unknown>
@@ -748,6 +755,7 @@ export const roteirizacaoService = {
         ...(inserirPayloadItem ? {
           payload_apoio_json: {
             ...item,
+            ...(getDataAgendaRawItem(item) ? { data_agenda: getDataAgendaRawItem(item) } : {}),
             sinalizacao_visual: {
               exclusivo: exclusivoItem,
               agendada: agendamentoItem,
@@ -805,7 +813,7 @@ export const roteirizacaoService = {
         motivo: motivoTriagem || statusTriagem || 'Não roteirizável na triagem',
         etapa_origem: 'm3_triagem',
       }
-      return { value: inserirPayloadApoio ? { ...registroBase, payload_apoio_json: item } : registroBase }
+      return { value: inserirPayloadApoio ? { ...registroBase, payload_apoio_json: { ...item, ...(getDataAgendaRawItem(item) ? { data_agenda: getDataAgendaRawItem(item) } : {}) } } : registroBase }
     }})
     rejeicoesPersistencia.push(...rejeitadosNaoRoteirizaveis)
 
@@ -850,7 +858,7 @@ export const roteirizacaoService = {
           'Saldo final da roteirização',
         etapa_origem: 'saldo_final_roteirizacao',
       }
-      return { value: inserirPayloadApoio ? { ...registroBase, payload_apoio_json: item } : registroBase }
+      return { value: inserirPayloadApoio ? { ...registroBase, payload_apoio_json: { ...item, ...(getDataAgendaRawItem(item) ? { data_agenda: getDataAgendaRawItem(item) } : {}) } } : registroBase }
     }})
     rejeicoesPersistencia.push(...rejeitadosSaldoFinal)
     const registrosRemanescentes = [...registrosNaoRoteirizaveisM3, ...registrosSaldoFinal]

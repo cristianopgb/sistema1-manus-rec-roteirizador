@@ -133,15 +133,19 @@ const isTruthyFlag = (valor: unknown): boolean => {
 
 type EspecificidadeVisual = 'normal' | 'exclusivo' | 'agendada' | 'restricao' | 'multipla'
 
+const getByPath = (source: Record<string, unknown>, path: string | string[]): unknown => {
+  const keys = Array.isArray(path) ? path : path.split('.')
+  return keys.reduce<unknown>((acc, chave) => {
+    if (!acc || typeof acc !== 'object' || Array.isArray(acc)) return undefined
+    return (acc as Record<string, unknown>)[chave]
+  }, source)
+}
+
 const temCampoVerdadeiro = (registro: Record<string, unknown>, campos: string[]): boolean => {
   const registroExpandido = juntarRegistrosAninhados(registro)
   return campos.some((campo) => {
     if (campo.includes('.')) {
-      const valor = campo.split('.').reduce<unknown>((acc, chave) => {
-        if (!acc || typeof acc !== 'object' || Array.isArray(acc)) return undefined
-        return (acc as Record<string, unknown>)[chave]
-      }, registroExpandido)
-      return isTruthyFlag(valor)
+      return isTruthyFlag(getByPath(registroExpandido, campo))
     }
     return isTruthyFlag(registroExpandido[campo])
   })
@@ -167,13 +171,10 @@ const temAgendamento = (registro: Record<string, unknown>): boolean => {
   })
 }
 
-const pegarPrimeiroTexto = (registro: Record<string, unknown>, campos: string[]): string | null => {
+const pegarPrimeiroTexto = (registro: Record<string, unknown>, campos: Array<string | string[]>): string | null => {
   const registroExpandido = juntarRegistrosAninhados(registro)
   for (const campo of campos) {
-    const valor = campo.split('.').reduce<unknown>((acc, chave) => {
-      if (!acc || typeof acc !== 'object' || Array.isArray(acc)) return undefined
-      return (acc as Record<string, unknown>)[chave]
-    }, registroExpandido)
+    const valor = getByPath(registroExpandido, campo)
     if (temTextoValido(valor)) return String(valor).trim()
   }
   return null
@@ -183,7 +184,7 @@ const pegarDataAgenda = (registro: Record<string, unknown>): string | null => (
   pegarPrimeiroTexto(registro, [
     'payload_apoio_json.data_agenda',
     'payload_apoio_json.agendam',
-    'payload_apoio_json.Agendam.',
+    ['payload_apoio_json', 'Agendam.'],
     'payload_apoio_json.agenda',
     'inicio_entrega',
     'data_agenda',
@@ -522,16 +523,13 @@ export function HistoricoPage() {
       return parsed === null ? null : Math.max(0, Math.trunc(parsed))
     }
 
-    const getByPath = (source: Record<string, unknown>, path: string): unknown => (
-      path.split('.').reduce<unknown>((acc, key) => {
-        if (!acc || typeof acc !== 'object' || Array.isArray(acc)) return null
-        return (acc as Record<string, unknown>)[key]
-      }, source)
+    const getByPathValue = (source: Record<string, unknown>, path: string): unknown => (
+      getByPath(source, path)
     )
 
     const pickFirstInt = (source: Record<string, unknown>, paths: string[]): number | null => {
       for (const path of paths) {
-        const value = toInt(getByPath(source, path))
+        const value = toInt(getByPathValue(source, path))
         if (value !== null) return value
       }
       return null
@@ -539,7 +537,7 @@ export function HistoricoPage() {
 
     const pickFirstArrayLength = (source: Record<string, unknown>, paths: string[]): number | null => {
       for (const path of paths) {
-        const value = getByPath(source, path)
+        const value = getByPathValue(source, path)
         if (Array.isArray(value)) return value.length
       }
       return null
