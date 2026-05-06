@@ -512,6 +512,12 @@ export function HistoricoPage() {
     () => remanescentesRepescagem.filter((r) => !!r.carteira_item_id),
     [remanescentesRepescagem],
   )
+  useEffect(() => {
+    console.log('[REPESCAGEM UI] remanescentes_total=', remanescentes.length)
+    console.log('[REPESCAGEM UI] saldo_final=', remanescentesRepescagem.length)
+    console.log('[REPESCAGEM UI] com_carteira_item_id=', remanescentesRepescagemComVinculo.length)
+    console.log('[REPESCAGEM UI] amostra=', remanescentesRepescagem.slice(0, 3))
+  }, [remanescentes, remanescentesRepescagem, remanescentesRepescagemComVinculo])
 
   const handleCriarRepescagem = async () => {
     if (!rodadaSelecionada) return
@@ -1050,6 +1056,11 @@ export function HistoricoPage() {
               <div className="flex items-center justify-end">
                 <button className="px-3 py-2 rounded-lg text-sm bg-brand-600 text-white disabled:opacity-50" disabled={remanescentesRepescagemComVinculo.length === 0} onClick={() => void handleCriarRepescagem()}>Roteirizar remanescentes</button>
               </div>
+              {remanescentesRepescagem.length > 0 && remanescentesRepescagemComVinculo.length === 0 && (
+                <p className="text-xs text-amber-700">
+                  Remanescentes sem vínculo de linha original. Gere uma nova roteirização para habilitar repescagem.
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
                 <div className="p-3 rounded-lg bg-gray-50 text-xs"><div className="text-gray-500">Total remanescentes</div><strong>{resumoRemanescentes.total}</strong></div>
                 <div className="p-3 rounded-lg bg-blue-50 text-xs"><div className="text-gray-500">Roteirizáveis não atendidas</div><strong>{resumoRemanescentes.roteirizaveis}</strong></div>

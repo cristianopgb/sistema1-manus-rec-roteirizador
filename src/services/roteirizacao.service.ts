@@ -1531,7 +1531,7 @@ export const roteirizacaoService = {
       supabase.from('manifestos_roteirizacao').select('*').eq('rodada_id', rodadaId).order('manifesto_id'),
       supabase
         .from('remanescentes_roteirizacao')
-        .select('id, rodada_id, tipo_remanescente, id_linha_pipeline, nro_documento, destinatario, cidade, uf, peso_calculado, distancia_rodoviaria_est_km, mesorregiao, subregiao, corredor_30g, corredor_30g_idx, status_triagem, motivo_triagem, motivo_detalhado_m6_2, motivo_final_remanescente_m6_2, motivo_final_remanescente_m5_4, motivo_final_remanescente_m5_3, motivo, etapa_origem, payload_apoio_json, created_at')
+        .select('id, rodada_id, tipo_remanescente, id_linha_pipeline, nro_documento, destinatario, cidade, uf, peso_calculado, distancia_rodoviaria_est_km, mesorregiao, subregiao, corredor_30g, corredor_30g_idx, status_triagem, motivo_triagem, motivo_detalhado_m6_2, motivo_final_remanescente_m6_2, motivo_final_remanescente_m5_4, motivo_final_remanescente_m5_3, motivo, etapa_origem, carteira_item_id, payload_apoio_json, created_at')
         .eq('rodada_id', rodadaId)
         .order('created_at'),
       supabase.from('estatisticas_roteirizacao').select('*').eq('rodada_id', rodadaId).maybeSingle(),
