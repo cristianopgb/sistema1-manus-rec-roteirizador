@@ -607,22 +607,134 @@ const mapearStatusMotorParaStatusRodada = (
 }
 
 export const roteirizacaoService = {
-  async executarRepescagemRemanescentes(rodadaOrigemId: string): Promise<{ rodadaId: string | null; totalEnviadas: number }> {
+  async executarRepescagemRemanescentes(rodadaOrigemId: string, usuarioAtualId?: string): Promise<{ rodadaId: string; totalEnviadas: number; totalManifestos: number; totalItensManifestados: number }> {
+    const inicio = Date.now()
     console.log(`[REPESCAGEM] inicio rodada_origem_id=${rodadaOrigemId}`)
+    const { data: rodadaOrigem, error: rodadaError } = await supabase
+      .from('rodadas_roteirizacao')
+      .select('id, upload_id, filial_id, filial_nome, usuario_id, usuario_nome, tipo_roteirizacao, data_base_roteirizacao, payload_enviado, tipo_execucao, created_at')
+      .eq('id', rodadaOrigemId)
+      .single()
+    if (rodadaError || !rodadaOrigem) throw new Error('Rodada de origem não encontrada para repescagem.')
+    if (!rodadaOrigem.upload_id) throw new Error('A rodada de origem não possui upload_id válido para repescagem.')
+    const payloadOriginal = toRecord(rodadaOrigem.payload_enviado)
+    if (!payloadOriginal) throw new Error('A rodada de origem não possui payload suficiente para repescagem.')
+
     const { data, error } = await supabase
       .from('remanescentes_roteirizacao')
       .select('id, carteira_item_id')
       .eq('rodada_id', rodadaOrigemId)
       .eq('tipo_remanescente', 'roteirizavel_saldo_final')
     if (error) throw error
+    const remanescentesValidos = (data ?? []).filter((item) => !!item.carteira_item_id)
     const totalRemanescentesSaldo = data?.length ?? 0
-    const totalComCarteiraItemId = (data ?? []).filter((item) => !!item.carteira_item_id).length
+    const totalComCarteiraItemId = remanescentesValidos.length
     console.log(`[REPESCAGEM] total_remanescentes_saldo=${totalRemanescentesSaldo}`)
     console.log(`[REPESCAGEM] total_com_carteira_item_id=${totalComCarteiraItemId}`)
     console.log(`[REPESCAGEM] total_sem_carteira_item_id=${Math.max(0, totalRemanescentesSaldo - totalComCarteiraItemId)}`)
     if (!totalComCarteiraItemId) throw new Error('Não há remanescentes roteirizáveis com vínculo de linha original para repescagem.')
-    console.log('[REPESCAGEM] modo_preparatorio=dry_run')
-    return { rodadaId: null, totalEnviadas: totalComCarteiraItemId }
+
+    const carteiraItemIds = remanescentesValidos.map((item) => String(item.carteira_item_id))
+    const { data: carteiraRows, error: carteiraError } = await supabase.from('carteira_itens').select('*').in('id', carteiraItemIds)
+    if (carteiraError) throw carteiraError
+    const carteiraPorId = new Map((carteiraRows ?? []).map((row: any) => [String(row.id), row]))
+    const remanescentesPorCarteiraId = new Map(remanescentesValidos.map((r) => [String(r.carteira_item_id), r]))
+
+    const invalidTokens = new Set(['', '-', 'nat', 'nan', 'null', 'undefined'])
+    const isValorInvalido = (value: unknown): boolean => {
+      if (value === null || value === undefined) return true
+      const txt = String(value).trim().toLowerCase()
+      return invalidTokens.has(txt)
+    }
+    const validarLinhaRepescagemContrato = (item: CarteiraCargaContratoMotor): string[] => {
+      const erros: string[] = []
+      if (isValorInvalido(item['Nro Doc.'])) erros.push('Documento/Nro Doc.')
+      if (isValorInvalido(item.Destin)) erros.push('Destinatário/Destin')
+      if (isValorInvalido(item.Cidad ?? item['Cidade Dest.'])) erros.push('Cidade')
+      if (isValorInvalido(item.UF)) erros.push('UF')
+      if (isValorInvalido(item['D.L.E.'])) erros.push('D.L.E.')
+      if (isValorInvalido(item['Peso Calculo'])) erros.push('Peso Calculo')
+      if (isValorInvalido(item.Latitude)) erros.push('Latitude')
+      if (isValorInvalido(item.Longitude)) erros.push('Longitude')
+      return erros
+    }
+
+    const carteiraValidaRepescagem: CarteiraCargaContratoMotor[] = []
+    const itensRejeitados: Array<{ remanescente_id: string; carteira_item_id: string; motivo_rejeicao: string }> = []
+    const itensSemLinhaOriginal: Array<{ remanescente_id: string; carteira_item_id: string; motivo_rejeicao: string }> = []
+    remanescentesValidos.forEach((r, index) => {
+      const carteiraRaw = carteiraPorId.get(String(r.carteira_item_id))
+      if (!carteiraRaw) {
+        itensSemLinhaOriginal.push({
+          remanescente_id: String(r.id),
+          carteira_item_id: String(r.carteira_item_id),
+          motivo_rejeicao: 'carteira_item_id não encontrado em carteira_itens',
+        })
+        return
+      }
+      const dadosOriginais = toRecord(carteiraRaw.dados_originais_json)
+      const carteiraBase = normalizarCarteiraItem(dadosOriginais ? { ...carteiraRaw, ...dadosOriginais } : carteiraRaw)
+      const itemContrato = mapCarteiraItemToMotorContract(carteiraBase, index)
+      const erros = validarLinhaRepescagemContrato(itemContrato)
+      if (erros.length) {
+        itensRejeitados.push({ remanescente_id: String(r.id), carteira_item_id: String(r.carteira_item_id), motivo_rejeicao: `Dados críticos ausentes/inválidos: ${erros.join(', ')}` })
+        return
+      }
+      carteiraValidaRepescagem.push(itemContrato)
+    })
+    if (!carteiraValidaRepescagem.length) throw new Error('Não há linhas válidas para envio ao Motor na repescagem.')
+
+    const { count: countRepescagens } = await supabase.from('rodadas_roteirizacao').select('*', { count: 'exact', head: true }).eq('rodada_origem_id', rodadaOrigemId)
+    const repescagemNumero = (countRepescagens ?? 0) + 1
+    const rodadaFilhaId = crypto.randomUUID()
+    const payloadRepescagem: PayloadMotor & Record<string, unknown> = {
+      ...((payloadOriginal as unknown) as PayloadMotor),
+      rodada_id: rodadaFilhaId,
+      upload_id: rodadaOrigem.upload_id,
+      usuario_id: usuarioAtualId ?? rodadaOrigem.usuario_id,
+      filial_id: rodadaOrigem.filial_id,
+      tipo_roteirizacao: rodadaOrigem.tipo_roteirizacao,
+      data_base_roteirizacao: pickFirstText(payloadOriginal.data_base_roteirizacao, rodadaOrigem.data_base_roteirizacao) ?? new Date().toISOString(),
+      carteira: carteiraValidaRepescagem,
+      tipo_execucao: 'repescagem_remanescentes',
+      rodada_origem_id: rodadaOrigemId,
+      repescagem_numero: repescagemNumero,
+    }
+    const { error: rodadaFilhaError } = await supabase.from('rodadas_roteirizacao').insert({
+      id: rodadaFilhaId, tipo_execucao: 'repescagem_remanescentes', rodada_origem_id: rodadaOrigemId, repescagem_numero: repescagemNumero,
+      upload_id: rodadaOrigem.upload_id, filial_id: rodadaOrigem.filial_id, filial_nome: rodadaOrigem.filial_nome,
+      usuario_id: usuarioAtualId ?? rodadaOrigem.usuario_id, usuario_nome: rodadaOrigem.usuario_nome, tipo_roteirizacao: rodadaOrigem.tipo_roteirizacao,
+      data_base_roteirizacao: rodadaOrigem.data_base_roteirizacao, status: 'processando', total_cargas_entrada: carteiraValidaRepescagem.length,
+      payload_enviado: payloadRepescagem as unknown as Record<string, unknown>,
+    })
+    if (rodadaFilhaError) throw rodadaFilhaError
+
+    const itensEnvio = remanescentesValidos
+      .filter((r) => !itensRejeitados.find((rej) => rej.remanescente_id === String(r.id)))
+      .filter((r) => !itensSemLinhaOriginal.find((rej) => rej.remanescente_id === String(r.id)))
+      .map((r) => ({ rodada_origem_id: rodadaOrigemId, rodada_repescagem_id: rodadaFilhaId, remanescente_id: r.id, carteira_item_id: r.carteira_item_id, status_repescagem: 'enviado' }))
+    const itensRejPayload = itensRejeitados.map((rej) => ({ rodada_origem_id: rodadaOrigemId, rodada_repescagem_id: rodadaFilhaId, remanescente_id: rej.remanescente_id, carteira_item_id: rej.carteira_item_id, status_repescagem: 'rejeitado_dado_critico', motivo_rejeicao: rej.motivo_rejeicao }))
+    const itensSemLinhaOriginalPayload = itensSemLinhaOriginal.map((rej) => ({ rodada_origem_id: rodadaOrigemId, rodada_repescagem_id: rodadaFilhaId, remanescente_id: rej.remanescente_id, carteira_item_id: rej.carteira_item_id, status_repescagem: 'rejeitado_linha_original_nao_encontrada', motivo_rejeicao: rej.motivo_rejeicao }))
+    await supabase.from('rodadas_repescagem_itens').insert([...itensEnvio, ...itensRejPayload, ...itensSemLinhaOriginalPayload])
+
+    const veiculos = toRecordArray(payloadOriginal.veiculos).map((item) => mapVeiculoToMotor(item))
+    const finalUrl = buildMotor2Url(MOTOR_2_ROTEIRIZAR_PATH)
+    console.log(`[REPESCAGEM] chamada_motor_iniciada=${finalUrl}`)
+    const response = await fetch(finalUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadRepescagem), signal: AbortSignal.timeout(MOTOR_2_ROTEIRIZAR_TIMEOUT_MS) })
+    if (!response.ok) throw new Error(`Falha ao comunicar com o Motor de Roteirização: HTTP ${response.status}`)
+    const resposta = await response.json() as RespostaMotor
+    console.log(`[REPESCAGEM] chamada_motor_finalizada status=${resposta.status}`)
+    if (resposta.status === 'erro') {
+      await supabase.from('rodadas_roteirizacao').update({ status: 'erro', resposta_motor: resposta as unknown as Record<string, unknown>, erro_mensagem: resposta.erro?.mensagem ?? 'Erro do Motor', tempo_processamento_ms: Date.now() - inicio }).eq('id', rodadaFilhaId)
+      throw new Error(resposta.erro?.mensagem || 'Erro ao processar repescagem no Motor.')
+    }
+    await this.persistirEstruturaRodada(rodadaFilhaId, resposta, veiculos)
+    await this.calcularRotasGoogleRodada(rodadaFilhaId)
+    await this.calcularFretesManifestosRodada(rodadaFilhaId)
+    const totalManifestos = toRecordArray(resposta.manifestos_m7).length
+    const totalItensManifestados = toRecordArray(resposta.itens_manifestos_sequenciados_m7).length
+    await supabase.from('rodadas_roteirizacao').update({ status: 'sucesso', resposta_motor: resposta as unknown as Record<string, unknown>, total_manifestos: totalManifestos, total_itens_manifestados: totalItensManifestados, tempo_processamento_ms: Date.now() - inicio }).eq('id', rodadaFilhaId)
+    return { rodadaId: rodadaFilhaId, totalEnviadas: carteiraValidaRepescagem.length, totalManifestos, totalItensManifestados }
   },
   async persistirEstruturaRodada(
     rodadaId: string,
