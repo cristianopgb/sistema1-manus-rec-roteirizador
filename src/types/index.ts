@@ -89,6 +89,9 @@ export const EIXOS_VALIDOS = [2, 3, 4, 5, 6, 7, 9]
 export type StatusRodada = 'processando' | 'sucesso' | 'erro' | 'parcial'
 
 export interface RodadaRoteirizacao {
+  tipo_execucao?: 'principal' | 'repescagem_remanescentes'
+  rodada_origem_id?: string | null
+  repescagem_numero?: number | null
   id: string
   filial_id: string
   filial_nome?: string
@@ -521,6 +524,7 @@ export interface RemanescenteRoteirizacao {
   motivo_final_remanescente_m5_3: string | null
   motivo: string | null
   etapa_origem: string | null
+  carteira_item_id?: string | null
   payload_apoio_json?: Record<string, unknown> | null
   created_at: string
 }

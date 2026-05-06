@@ -504,6 +504,28 @@ export function HistoricoPage() {
     ...item,
     tipo_normalizado: normalizarTipoRemanescente(item),
   })), [remanescentes])
+  const remanescentesRepescagem = useMemo(
+    () => remanescentesNormalizados.filter((r) => r.tipo_normalizado === 'roteirizavel_saldo_final'),
+    [remanescentesNormalizados],
+  )
+  const remanescentesRepescagemComVinculo = useMemo(
+    () => remanescentesRepescagem.filter((r) => !!r.carteira_item_id),
+    [remanescentesRepescagem],
+  )
+
+  const handleCriarRepescagem = async () => {
+    if (!rodadaSelecionada) return
+    const cidades = Array.from(new Set(remanescentesRepescagemComVinculo.map((r) => String(r.cidade ?? '').trim()).filter(Boolean))).slice(0, 5).join(', ')
+    const pesoTotal = remanescentesRepescagemComVinculo.reduce((acc, r) => acc + (r.peso_calculado ?? 0), 0)
+    const confirmou = window.confirm(`Criar repescagem de remanescentes?\n\nRodada origem: ${rodadaSelecionada.id}\nRoteirizáveis: ${remanescentesRepescagem.length}\nCom vínculo linha original: ${remanescentesRepescagemComVinculo.length}\nPeso total: ${pesoTotal.toLocaleString('pt-BR')} kg\nCidades: ${cidades || '-'}\n\nSerá criada uma nova rodada de repescagem vinculada à rodada atual. A rodada original não será alterada.`)
+    if (!confirmou) return
+    try {
+      const res = await roteirizacaoService.executarRepescagemRemanescentes(rodadaSelecionada.id)
+      toast(`Pré-validação concluída: ${res.totalEnviadas} linha(s) válidas para repescagem.`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Falha ao preparar repescagem')
+    }
+  }
 
   const estatisticasComposicao = useMemo(() => {
     if (!rodadaSelecionada) return null
@@ -929,6 +951,7 @@ export function HistoricoPage() {
                   <th className="text-left px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[150px]">Data</th>
                   {isMaster && <th className="text-left px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[140px]">Filial</th>}
                   <th className="text-left px-3 py-2 font-semibold text-gray-600 whitespace-nowrap min-w-[140px]">Usuário</th>
+                  <th className="text-left px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[220px]">Tipo</th>
                   <th className="text-center px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[110px]">Status</th>
                   <th className="text-right px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[90px]">Entrada</th>
                   <th className="text-right px-3 py-2 font-semibold text-gray-600 whitespace-nowrap w-[110px]">Manifestos</th>
@@ -943,6 +966,7 @@ export function HistoricoPage() {
                       <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{r.created_at ? format(new Date(r.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '—'}</td>
                       {isMaster && <td className="px-3 py-2 text-gray-700">{r.filial_nome || '—'}</td>}
                       <td className="px-3 py-2 text-gray-700">{r.usuario_nome || '—'}</td>
+                      <td className="px-3 py-2 text-xs text-gray-700">{r.tipo_execucao === 'repescagem_remanescentes' ? `Repescagem #${r.repescagem_numero ?? '-'}${r.rodada_origem_id ? ` da rodada ${format(new Date(r.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}` : ''}` : 'Principal'}</td>
                       <td className="px-3 py-2 text-center"><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${statusBadge(r.status)}`}>{r.status}</span></td>
                       <td className="px-3 py-2 text-right text-gray-700">{r.total_cargas_entrada?.toLocaleString('pt-BR') || '—'}</td>
                       <td className="px-3 py-2 text-right font-semibold text-brand-700">{r.total_manifestos?.toLocaleString('pt-BR') || '—'}</td>
@@ -1022,6 +1046,9 @@ export function HistoricoPage() {
 
           {!detalhesLoading && tabAtiva === 'remanescentes' && (
             <div className="space-y-3">
+              <div className="flex items-center justify-end">
+                <button className="px-3 py-2 rounded-lg text-sm bg-brand-600 text-white disabled:opacity-50" disabled={remanescentesRepescagemComVinculo.length === 0} onClick={() => void handleCriarRepescagem()}>Roteirizar remanescentes</button>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
                 <div className="p-3 rounded-lg bg-gray-50 text-xs"><div className="text-gray-500">Total remanescentes</div><strong>{resumoRemanescentes.total}</strong></div>
                 <div className="p-3 rounded-lg bg-blue-50 text-xs"><div className="text-gray-500">Roteirizáveis não atendidas</div><strong>{resumoRemanescentes.roteirizaveis}</strong></div>
