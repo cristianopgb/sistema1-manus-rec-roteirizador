@@ -46,6 +46,7 @@ const DATASET_COLUNAS_BRUTAS = [
   'Carro Dedicado',
   'Inicio Ent.',
   'Fim En',
+  'Redespacho',
 ] as const
 
 const MAPEAMENTO_FIXO: Record<(typeof DATASET_COLUNAS_BRUTAS)[number], string> = {
@@ -92,6 +93,7 @@ const MAPEAMENTO_FIXO: Record<(typeof DATASET_COLUNAS_BRUTAS)[number], string> =
   'Carro Dedicado': 'carro_dedicado',
   'Inicio Ent.': 'inicio_entrega',
   'Fim En': 'fim_entrega',
+  Redespacho: 'redespacho_codigo',
 }
 
 const CAMPOS_NUMERICOS = new Set([
@@ -190,6 +192,12 @@ const parseBoolean = (value: unknown): boolean | null => {
   return null
 }
 
+const normalizarCodigoRedespacho = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null
+  const text = String(value).trim()
+  return text ? text : null
+}
+
 export function detectHeaderRow(rows: unknown[][]): number {
   const expected = DATASET_COLUNAS_BRUTAS.map(normalizeForComparison)
   let bestIndex = -1
@@ -233,17 +241,25 @@ const validarCabecalho = (headerRow: unknown[]): string[] => {
   const normalized = cleaned.map(normalizeForComparison)
   const expected = DATASET_COLUNAS_BRUTAS.map(normalizeForComparison)
 
-  if (normalized.length < expected.length) {
+  if (normalized.length < DATASET_COLUNAS_BRUTAS.length - 1) {
     throw new Error('Cabeçalho inválido: quantidade de colunas menor que o layout esperado.')
   }
 
-  for (let i = 0; i < expected.length; i += 1) {
-    if (normalized[i] !== expected[i]) {
-      throw new Error(`Cabeçalho incompatível na coluna ${i + 1}. Esperado "${DATASET_COLUNAS_BRUTAS[i]}".`)
+  const obrigatorias = DATASET_COLUNAS_BRUTAS.filter((c) => c !== 'Redespacho')
+  const obrigatoriasNorm = obrigatorias.map(normalizeForComparison)
+
+  for (let i = 0; i < obrigatoriasNorm.length; i += 1) {
+    if (normalized[i] !== obrigatoriasNorm[i]) {
+      throw new Error(`Cabeçalho incompatível na coluna ${i + 1}. Esperado "${obrigatorias[i]}".`)
     }
   }
 
-  return DATASET_COLUNAS_BRUTAS.map((_, i) => String(cleaned[i] ?? DATASET_COLUNAS_BRUTAS[i]))
+  const redespachoHeader = cleaned[obrigatorias.length]
+  if (redespachoHeader && normalizeForComparison(redespachoHeader) !== 'redespacho') {
+    throw new Error('Cabeçalho inválido para coluna opcional Redespacho.')
+  }
+
+  return cleaned.map((_, i) => String(cleaned[i] ?? DATASET_COLUNAS_BRUTAS[i]))
 }
 
 
@@ -301,6 +317,7 @@ export const carteiraUploadService = {
     const headerRowIndex = detectHeaderRow(rows)
     const headerRaw = validarCabecalho(rows[headerRowIndex] ?? [])
 
+    const redespachoColIndex = DATASET_COLUNAS_BRUTAS.indexOf('Redespacho')
     const mappedRows = rows
       .slice(headerRowIndex + 1)
       .map((row, index) => {
@@ -329,6 +346,15 @@ export const carteiraUploadService = {
             mapped[target] = text ? text : null
           }
         })
+
+        const redespachoAddress = XLSX.utils.encode_cell({ r: headerRowIndex + index + 1, c: redespachoColIndex })
+        const redespachoCell = worksheet[redespachoAddress]
+        // Preferimos o valor formatado (`w`) para preservar zeros à esquerda quando a célula foi formatada como texto no Excel.
+        const redespachoTexto = normalizarCodigoRedespacho(redespachoCell?.w ?? rawObject.Redespacho)
+        mapped.redespacho_codigo = redespachoTexto || null
+        mapped.redespacho_flag = Boolean(redespachoTexto)
+        mapped.redespacho_transportadora_id = null
+        mapped.redespacho_transportadora_nome = null
 
         return mapped
       })

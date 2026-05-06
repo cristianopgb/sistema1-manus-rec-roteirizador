@@ -201,6 +201,7 @@ export interface PayloadMotor {
     filtros_aplicados: FiltrosCarteira
   }
   carteira: CarteiraCargaContratoMotor[]
+  transportadoras_redespacho?: Array<{ id: string; codigo: string; nome: string; ativo: boolean }>
 }
 
 export interface CarteiraCarga {
@@ -252,6 +253,10 @@ export interface CarteiraCargaContratoMotor {
   'Carro Dedicado': unknown
   'Inicio Ent.': unknown
   'Fim En': unknown
+  redespacho_flag?: boolean
+  redespacho_codigo?: string | null
+  redespacho_transportadora_id?: string | null
+  redespacho_transportadora_nome?: string | null
 }
 
 // --- Resposta do Motor (Sistema 2) ---

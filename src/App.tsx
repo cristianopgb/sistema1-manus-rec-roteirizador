@@ -11,6 +11,7 @@ import { FilialPage } from '@/pages/cadastros/FilialPage'
 import { VeiculoPage } from '@/pages/cadastros/VeiculoPage'
 import { UsuarioPage } from '@/pages/cadastros/UsuarioPage'
 import { TabelaAnttPage } from '@/pages/cadastros/TabelaAnttPage'
+import { TransportadorasRedespachoPage } from '@/pages/cadastros/TransportadorasRedespachoPage'
 import { HistoricoPage } from '@/pages/HistoricoPage'
 import { RotasPage } from '@/pages/RotasPage'
 
@@ -127,6 +128,7 @@ function AppRoutes() {
           <Route path="veiculos" element={<ProtectedRoute masterOnly><VeiculoPage /></ProtectedRoute>} />
           <Route path="usuarios" element={<ProtectedRoute masterOnly><UsuarioPage /></ProtectedRoute>} />
           <Route path="tabela-antt" element={<ProtectedRoute masterOnly><TabelaAnttPage /></ProtectedRoute>} />
+          <Route path="transportadoras-redespacho" element={<ProtectedRoute masterOnly><TransportadorasRedespachoPage /></ProtectedRoute>} />
         </Route>
       </Route>
 

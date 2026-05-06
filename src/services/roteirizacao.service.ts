@@ -291,6 +291,10 @@ const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): Car
   'Fim En': fimEnNormalizado,
   carteira_item_id: item._carteira_item_id ?? null,
   _carteira_item_id: item._carteira_item_id ?? null,
+  redespacho_flag: item.redespacho_flag === true,
+  redespacho_codigo: (typeof item.redespacho_codigo === 'string' && item.redespacho_codigo.trim()) ? item.redespacho_codigo.trim() : null,
+  redespacho_transportadora_id: typeof item.redespacho_transportadora_id === 'string' ? item.redespacho_transportadora_id : null,
+  redespacho_transportadora_nome: typeof item.redespacho_transportadora_nome === 'string' ? item.redespacho_transportadora_nome : null,
 })
 }
 
@@ -1166,6 +1170,41 @@ export const roteirizacaoService = {
     }
 
     const rodadaId = crypto.randomUUID()
+    const codigosRedespacho = Array.from(new Set(carteira.map((item) => typeof item.redespacho_codigo === 'string' ? item.redespacho_codigo.trim() : '').filter(Boolean)))
+    console.log('[REDESPACHO] total linhas com redespacho:', carteira.filter((item) => item.redespacho_flag === true && typeof item.redespacho_codigo === 'string' && item.redespacho_codigo.trim()).length)
+    console.log('[REDESPACHO] códigos encontrados:', codigosRedespacho)
+    let transportadorasRedespacho: Array<{ id: string; codigo: string; nome: string; ativo: boolean }> = []
+    if (codigosRedespacho.length > 0) {
+      const { data: redespachoData, error: redespachoError } = await supabase
+        .from('transportadoras_redespacho')
+        .select('id, filial_id, codigo, nome, ativo')
+        .in('codigo', codigosRedespacho)
+        .eq('ativo', true)
+      if (redespachoError) throw redespachoError
+      const validas = (redespachoData ?? []).filter((t: any) => !t.filial_id || t.filial_id === filial.id)
+      const mapa = new Map(validas.map((t: any) => [String(t.codigo).trim(), t]))
+      const invalidos = codigosRedespacho.filter((codigo) => !mapa.has(codigo))
+      if (invalidos.length) {
+        throw new Error(`Existem pedidos com código de redespacho não cadastrado ou inativo: ${invalidos.join(', ')}. Cadastre ou ative a transportadora parceira antes de roteirizar.`)
+      }
+      carteira.forEach((item) => {
+        const codigo = typeof item.redespacho_codigo === 'string' ? item.redespacho_codigo.trim() : ''
+        const encontrada = codigo ? mapa.get(codigo) : null
+        if (encontrada) {
+          item.redespacho_flag = true
+          item.redespacho_transportadora_id = encontrada.id
+          item.redespacho_transportadora_nome = encontrada.nome
+          item.redespacho_codigo = codigo
+        } else {
+          item.redespacho_flag = false
+          item.redespacho_transportadora_id = null
+          item.redespacho_transportadora_nome = null
+          item.redespacho_codigo = null
+        }
+      })
+      transportadorasRedespacho = validas.map((t: any) => ({ id: t.id, codigo: t.codigo, nome: t.nome, ativo: t.ativo }))
+      console.log('[REDESPACHO] códigos validados com sucesso:', codigosRedespacho.length)
+    }
     const dataBaseRoteirizacaoIso = toIsoCompleto(filtros.data_base)
     const dataExecucaoIso = new Date().toISOString()
     const carteiraContrato = carteira.map((item, index) => mapCarteiraItemToMotorContract(item, index))
@@ -1244,6 +1283,7 @@ export const roteirizacaoService = {
         filtros_aplicados: filtros.filtros_aplicados,
       },
       carteira: carteiraContrato,
+      transportadoras_redespacho: transportadorasRedespacho,
     }
 
     const payloadResumido = {
