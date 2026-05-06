@@ -53,6 +53,7 @@ const navItems: (NavItem | NavGroup)[] = [
       { label: 'Veículos', to: '/cadastros/veiculos', icon: <Truck size={16} />, masterOnly: true },
       { label: 'Usuários', to: '/cadastros/usuarios', icon: <Users size={16} />, masterOnly: true },
       { label: 'Tabela ANTT', to: '/cadastros/tabela-antt', icon: <FileSpreadsheet size={16} />, masterOnly: true },
+      { label: 'Transportadoras Redespacho', to: '/cadastros/transportadoras-redespacho', icon: <Truck size={16} />, masterOnly: true },
     ],
   },
 ]

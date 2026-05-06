@@ -135,8 +135,25 @@ export type Database = {
           carro_dedicado: boolean | null
           inicio_entrega: string | null
           fim_entrega: string | null
+          redespacho_flag: boolean
+          redespacho_codigo: string | null
+          redespacho_transportadora_id: string | null
+          redespacho_transportadora_nome: string | null
           dados_originais_json: Json
           created_at: string
+        }
+      }
+      transportadoras_redespacho: {
+        Row: {
+          id: string
+          filial_id: string | null
+          codigo: string
+          nome: string
+          cnpj: string | null
+          ativo: boolean
+          observacao: string | null
+          created_at: string
+          updated_at: string
         }
       }
       rodadas_roteirizacao: {
