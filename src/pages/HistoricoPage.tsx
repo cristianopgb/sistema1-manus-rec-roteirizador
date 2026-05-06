@@ -291,7 +291,7 @@ const coletarValores = (itens: ManifestoItemRoteirizacao[], campos: string[]): s
 const juntarValores = (valores: string[], separador = ' / '): string => (valores.length ? valores.join(separador) : '—')
 
 export function HistoricoPage() {
-  const { isMaster, filialAtiva } = useAuth()
+  const { user, isMaster, filialAtiva } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const rodadaEmFoco = searchParams.get('rodada')
@@ -520,8 +520,9 @@ export function HistoricoPage() {
     const confirmou = window.confirm(`Criar repescagem de remanescentes?\n\nRodada origem: ${rodadaSelecionada.id}\nRoteirizáveis: ${remanescentesRepescagem.length}\nCom vínculo linha original: ${remanescentesRepescagemComVinculo.length}\nPeso total: ${pesoTotal.toLocaleString('pt-BR')} kg\nCidades: ${cidades || '-'}\n\nSerá criada uma nova rodada de repescagem vinculada à rodada atual. A rodada original não será alterada.`)
     if (!confirmou) return
     try {
-      const res = await roteirizacaoService.executarRepescagemRemanescentes(rodadaSelecionada.id)
-      toast(`Pré-validação concluída: ${res.totalEnviadas} linha(s) válidas para repescagem.`)
+      const res = await roteirizacaoService.executarRepescagemRemanescentes(rodadaSelecionada.id, user?.id)
+      toast.success('Repescagem criada com sucesso.')
+      navigate(`/historico?rodada=${res.rodadaId}`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Falha ao preparar repescagem')
     }
