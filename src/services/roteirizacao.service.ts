@@ -125,6 +125,7 @@ const normalizarCarteiraItem = (item: any): CarteiraCarga => {
   const { id, upload_id, status_validacao, erro_validacao, created_at, dados_originais_json, ...rest } = item
   return ({
     ...rest,
+    carteira_item_id: id,
     _carteira_item_id: id,
     _upload_id: upload_id,
     _status_validacao: status_validacao,
@@ -288,6 +289,8 @@ const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): Car
   'Carro Dedicado': item.carro_dedicado,
   'Inicio Ent.': inicioEntregaNormalizado,
   'Fim En': fimEnNormalizado,
+  carteira_item_id: item._carteira_item_id ?? null,
+  _carteira_item_id: item._carteira_item_id ?? null,
 })
 }
 
@@ -583,6 +586,16 @@ const extrairRemanescentesM7 = (resposta: RespostaMotor): {
   }
 }
 
+const extrairCarteiraItemIdRemanescente = (item: Record<string, unknown>): string | null => {
+  const payload = toRecord(item.payload_apoio_json)
+  const carteiraItemId = pickFirstText(item.carteira_item_id, item._carteira_item_id, payload?.carteira_item_id, payload?._carteira_item_id)
+  if (carteiraItemId) return carteiraItemId
+  const documento = item.nro_documento ? String(item.nro_documento).trim() : null
+  const idLinha = item.id_linha_pipeline ? String(item.id_linha_pipeline).trim() : null
+  console.log(`[REPESCAGEM] remanescente_sem_carteira_item_id documento=${documento ?? '-'} id_linha_pipeline=${idLinha ?? '-'}`)
+  return null
+}
+
 const mapearStatusMotorParaStatusRodada = (
   statusMotor: unknown,
   houveErroPosProcessamento: boolean,
@@ -594,6 +607,23 @@ const mapearStatusMotorParaStatusRodada = (
 }
 
 export const roteirizacaoService = {
+  async executarRepescagemRemanescentes(rodadaOrigemId: string): Promise<{ rodadaId: string | null; totalEnviadas: number }> {
+    console.log(`[REPESCAGEM] inicio rodada_origem_id=${rodadaOrigemId}`)
+    const { data, error } = await supabase
+      .from('remanescentes_roteirizacao')
+      .select('id, carteira_item_id')
+      .eq('rodada_id', rodadaOrigemId)
+      .eq('tipo_remanescente', 'roteirizavel_saldo_final')
+    if (error) throw error
+    const totalRemanescentesSaldo = data?.length ?? 0
+    const totalComCarteiraItemId = (data ?? []).filter((item) => !!item.carteira_item_id).length
+    console.log(`[REPESCAGEM] total_remanescentes_saldo=${totalRemanescentesSaldo}`)
+    console.log(`[REPESCAGEM] total_com_carteira_item_id=${totalComCarteiraItemId}`)
+    console.log(`[REPESCAGEM] total_sem_carteira_item_id=${Math.max(0, totalRemanescentesSaldo - totalComCarteiraItemId)}`)
+    if (!totalComCarteiraItemId) throw new Error('Não há remanescentes roteirizáveis com vínculo de linha original para repescagem.')
+    console.log('[REPESCAGEM] modo_preparatorio=dry_run')
+    return { rodadaId: null, totalEnviadas: totalComCarteiraItemId }
+  },
   async persistirEstruturaRodada(
     rodadaId: string,
     resposta: RespostaMotor,
@@ -799,6 +829,7 @@ export const roteirizacaoService = {
       const registroBase = {
         rodada_id: rodadaId,
         tipo_remanescente: 'nao_roteirizavel_triagem',
+        carteira_item_id: extrairCarteiraItemIdRemanescente(item),
         id_linha_pipeline: toTextRemanescente(item.id_linha_pipeline) || null,
         nro_documento: nroDocumento,
         destinatario,
@@ -835,6 +866,7 @@ export const roteirizacaoService = {
       const registroBase = {
         rodada_id: rodadaId,
         tipo_remanescente: 'roteirizavel_saldo_final',
+        carteira_item_id: extrairCarteiraItemIdRemanescente(item),
         id_linha_pipeline: toTextRemanescente(item.id_linha_pipeline) || null,
         nro_documento: nroDocumento,
         destinatario,
