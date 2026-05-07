@@ -455,6 +455,35 @@ const extrairMensagemErroRuntime = (erro: unknown): string => {
   }
 }
 
+const extrairMensagemLogRelevante = (logs: unknown): string | null => {
+  if (typeof logs === 'string') return toText(logs)
+  if (!Array.isArray(logs)) return null
+
+  for (const log of logs) {
+    if (typeof log === 'string') {
+      const texto = toText(log)
+      if (texto) return texto
+      continue
+    }
+    if (log && typeof log === 'object') {
+      const logRecord = log as Record<string, unknown>
+      const texto = pickFirstText(logRecord.mensagem, logRecord.message, logRecord.erro, logRecord.error, logRecord.detalhe, logRecord.detail)
+      if (texto) return texto
+    }
+  }
+  return null
+}
+
+const extrairMensagemErroMotor = (resposta: Partial<RespostaMotor> | null | undefined): string => {
+  return pickFirstText(
+    resposta?.mensagem,
+    resposta?.erro?.mensagem,
+    resposta?.erro_tecnico,
+    resposta?.detalhe_tecnico,
+    extrairMensagemLogRelevante(resposta?.logs),
+  ) ?? 'O motor retornou erro, mas não informou mensagem técnica.'
+}
+
 const pickFirstText = (...values: unknown[]): string | null => {
   for (const value of values) {
     const text = toText(value)
@@ -730,8 +759,15 @@ export const roteirizacaoService = {
     const resposta = await response.json() as RespostaMotor
     console.log(`[REPESCAGEM] chamada_motor_finalizada status=${resposta.status}`)
     if (resposta.status === 'erro') {
-      await supabase.from('rodadas_roteirizacao').update({ status: 'erro', resposta_motor: resposta as unknown as Record<string, unknown>, erro_mensagem: resposta.erro?.mensagem ?? 'Erro do Motor', tempo_processamento_ms: Date.now() - inicio }).eq('id', rodadaFilhaId)
-      throw new Error(resposta.erro?.mensagem || 'Erro ao processar repescagem no Motor.')
+      const mensagemErroMotor = extrairMensagemErroMotor(resposta)
+      console.error('[ROTEIRIZACAO][ERRO MOTOR] status:', resposta.status)
+      console.error('[ROTEIRIZACAO][ERRO MOTOR] mensagem:', resposta.mensagem ?? null)
+      console.error('[ROTEIRIZACAO][ERRO MOTOR] erro_tecnico:', resposta.erro_tecnico ?? resposta.erro?.mensagem ?? null)
+      console.error('[ROTEIRIZACAO][ERRO MOTOR] pipeline_real_ate:', resposta.pipeline_real_ate ?? null)
+      console.error('[ROTEIRIZACAO][ERRO MOTOR] resumo_execucao:', resposta.resumo_execucao ?? null)
+      console.error('[ROTEIRIZACAO][ERRO MOTOR] logs:', resposta.logs ?? null)
+      await supabase.from('rodadas_roteirizacao').update({ status: 'erro', resposta_motor: resposta as unknown as Record<string, unknown>, erro_mensagem: mensagemErroMotor, tempo_processamento_ms: Date.now() - inicio }).eq('id', rodadaFilhaId)
+      throw new Error(mensagemErroMotor)
     }
     await this.persistirEstruturaRodada(rodadaFilhaId, resposta, veiculos)
     await this.calcularRotasGoogleRodada(rodadaFilhaId)
@@ -1424,7 +1460,14 @@ export const roteirizacaoService = {
 
     try {
       if (resposta.status === 'erro') {
-        throw new Error(resposta.erro?.mensagem || 'O motor retornou um erro desconhecido')
+        const mensagemErroMotor = extrairMensagemErroMotor(resposta)
+        console.error('[ROTEIRIZACAO][ERRO MOTOR] status:', resposta.status)
+        console.error('[ROTEIRIZACAO][ERRO MOTOR] mensagem:', resposta.mensagem ?? null)
+        console.error('[ROTEIRIZACAO][ERRO MOTOR] erro_tecnico:', resposta.erro_tecnico ?? resposta.erro?.mensagem ?? null)
+        console.error('[ROTEIRIZACAO][ERRO MOTOR] pipeline_real_ate:', resposta.pipeline_real_ate ?? null)
+        console.error('[ROTEIRIZACAO][ERRO MOTOR] resumo_execucao:', resposta.resumo_execucao ?? null)
+        console.error('[ROTEIRIZACAO][ERRO MOTOR] logs:', resposta.logs ?? null)
+        throw new Error(mensagemErroMotor)
       }
 
       // 3. Calcular frete mínimo ANTT para cada manifesto (deslocamento + carga/descarga da categoria Carga geral)
@@ -1484,7 +1527,7 @@ export const roteirizacaoService = {
         status: statusFinal,
         payload_enviado: payload as unknown as Record<string, unknown>,
         resposta_motor: resposta as unknown as Record<string, unknown>,
-        erro_mensagem: statusFinal === 'erro' ? (erroPosRetorno || resposta.erro?.mensagem || null) : null,
+        erro_mensagem: statusFinal === 'erro' ? (erroPosRetorno || extrairMensagemErroMotor(resposta)) : null,
       }
       if (statusFinal === 'erro') {
         rodadaPayload.tempo_processamento_ms = tempoMs
@@ -1507,7 +1550,7 @@ export const roteirizacaoService = {
     }
 
     if (statusFinal === 'erro') {
-      throw new Error(erroPosRetorno || resposta.erro?.mensagem || 'O fluxo pós-retorno falhou')
+      throw new Error(erroPosRetorno || extrairMensagemErroMotor(resposta) || 'O fluxo pós-retorno falhou')
     }
 
     const tempoMs = Date.now() - inicio
