@@ -318,6 +318,8 @@ export const carteiraUploadService = {
     const headerRaw = validarCabecalho(rows[headerRowIndex] ?? [])
 
     const redespachoColIndex = DATASET_COLUNAS_BRUTAS.indexOf('Redespacho')
+    let linhasIgnoradasCabecalhoRedespacho = 0
+
     const mappedRows = rows
       .slice(headerRowIndex + 1)
       .map((row, index) => {
@@ -359,12 +361,22 @@ export const carteiraUploadService = {
         return mapped
       })
       .filter((row) => {
+        const redespachoMapped = normalizeForComparison(row.redespacho_codigo)
+        const rawObject = (row.dados_originais_json ?? {}) as Record<string, unknown>
+        const redespachoRaw = normalizeForComparison(rawObject.Redespacho)
+        if (redespachoMapped === 'redespacho' || redespachoRaw === 'redespacho') {
+          linhasIgnoradasCabecalhoRedespacho += 1
+          return false
+        }
+
         const cleanRow = { ...row }
         delete cleanRow.linha_numero
         delete cleanRow.status_validacao
         delete cleanRow.dados_originais_json
         return !isRowFullyEmpty(cleanRow)
       })
+
+    console.log('[UPLOAD REDESPACHO] linhas ignoradas por cabeçalho redespacho:', linhasIgnoradasCabecalhoRedespacho)
 
     const totalLinhasImportadas = mappedRows.length
     const preview = mappedRows.slice(0, 5).map((item) => {

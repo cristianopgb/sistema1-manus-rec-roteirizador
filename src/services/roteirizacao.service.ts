@@ -14,6 +14,7 @@ import {
   RotaManifestoGoogle, RotaManifestoParadaGoogle
 } from '@/types'
 import { normalizeHorarioJanela } from '@/lib/time-normalizers'
+import { normalizeForComparison } from './carteira-upload.service'
 import {
   normalizeAgendam,
   normalizeDataDesDataNF,
@@ -1170,8 +1171,12 @@ export const roteirizacaoService = {
     }
 
     const rodadaId = crypto.randomUUID()
-    const codigosRedespacho = Array.from(new Set(carteira.map((item) => typeof item.redespacho_codigo === 'string' ? item.redespacho_codigo.trim() : '').filter(Boolean)))
-    console.log('[REDESPACHO] total linhas com redespacho:', carteira.filter((item) => item.redespacho_flag === true && typeof item.redespacho_codigo === 'string' && item.redespacho_codigo.trim()).length)
+    const codigosRedespacho = Array.from(new Set(
+      carteira
+        .map((item) => typeof item.redespacho_codigo === 'string' ? item.redespacho_codigo.trim() : '')
+        .filter((codigo) => Boolean(codigo) && normalizeForComparison(codigo) !== 'redespacho')
+    ))
+    console.log('[REDESPACHO] total linhas com redespacho:', carteira.filter((item) => item.redespacho_flag === true && typeof item.redespacho_codigo === 'string' && item.redespacho_codigo.trim() && normalizeForComparison(item.redespacho_codigo) !== 'redespacho').length)
     console.log('[REDESPACHO] códigos encontrados:', codigosRedespacho)
     let transportadorasRedespacho: Array<{ id: string; codigo: string; nome: string; ativo: boolean }> = []
     if (codigosRedespacho.length > 0) {
