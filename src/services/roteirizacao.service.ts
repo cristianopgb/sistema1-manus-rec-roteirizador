@@ -515,36 +515,39 @@ const hasNonEmptyText = (value: unknown): boolean => {
   return !['nat', 'null', 'undefined', '-', '—', 'na', 'n/a', 'sem agendamento', 'nao agendado'].includes(text)
 }
 
+type OrigemSinalizacao = 'campo' | 'fallback' | 'data_janela' | 'ausente'
+
 const temSinalizacaoExclusiva = (registro: Record<string, unknown>): boolean => {
-  return toBooleanKeyword(registro.exclusivo_flag, ['exclusivo', 'dedicado'])
-    || toBooleanKeyword(registro.veiculo_exclusivo_flag, ['exclusivo', 'dedicado'])
+  return toBooleanLike(registro.exclusivo_flag)
+    || toBooleanLike(registro.veiculo_exclusivo_flag)
     || toBooleanKeyword(registro.veiculo_exclusivo, ['exclusivo', 'dedicado'])
     || toBooleanKeyword(registro.exclusivo, ['exclusivo', 'dedicado'])
-    || toBooleanKeyword(registro.carro_dedicado, ['exclusivo', 'dedicado'])
-    || toBooleanKeyword(registro.carro_dedicado_flag, ['exclusivo', 'dedicado'])
+    || toBooleanLike(registro.carro_dedicado)
+    || toBooleanLike(registro.carro_dedicado_flag)
 }
 
-const temSinalizacaoAgendamento = (registro: Record<string, unknown>): boolean => {
-  if (toBooleanKeyword(registro.agendada, ['agendado', 'agendada']) || toBooleanKeyword(registro.agendado, ['agendado', 'agendada'])) return true
+const temSinalizacaoAgendamentoDetalhada = (registro: Record<string, unknown>): { valor: boolean; origem: OrigemSinalizacao } => {
+  if (toBooleanLike(registro.agendada) || toBooleanLike(registro.agendado) || toBooleanKeyword(registro.agendada, ['agendado', 'agendada']) || toBooleanKeyword(registro.agendado, ['agendado', 'agendada'])) return { valor: true, origem: 'campo' }
   const sinalizacaoVisual = toRecord(registro.sinalizacao_visual)
-  if (sinalizacaoVisual && toBooleanKeyword(sinalizacaoVisual.agendada, ['agendado', 'agendada'])) return true
-  return hasNonEmptyText(registro.data_agenda)
+  if (sinalizacaoVisual && (toBooleanLike(sinalizacaoVisual.agendada) || toBooleanKeyword(sinalizacaoVisual.agendada, ['agendado', 'agendada']))) return { valor: true, origem: 'campo' }
+  const temDataJanela = hasNonEmptyText(registro.data_agenda)
     || hasNonEmptyText(registro.data_agendamento)
     || hasNonEmptyText(registro.dt_agendamento)
     || hasNonEmptyText(registro.data_programada)
     || hasNonEmptyText(registro.agendam)
     || hasNonEmptyText(registro['Agendam.'])
     || hasNonEmptyText(registro.agenda)
+  return temDataJanela ? { valor: true, origem: 'data_janela' } : { valor: false, origem: 'ausente' }
 }
+const temSinalizacaoAgendamento = (registro: Record<string, unknown>): boolean => temSinalizacaoAgendamentoDetalhada(registro).valor
 
 const temSinalizacaoRestricao = (registro: Record<string, unknown>): boolean => {
-  return toBooleanKeyword(registro.restricao, ['restricao', 'restrição'])
+  return toBooleanLike(registro.restricao_flag)
+    || toBooleanLike(registro.tem_restricao)
+    || toBooleanKeyword(registro.restricao, ['restricao', 'restrição'])
     || toBooleanKeyword(registro.restricoes, ['restricao', 'restrição'])
     || toBooleanKeyword(registro.restricao_veiculo, ['restricao', 'restrição'])
     || toBooleanKeyword(registro.cliente_com_restricao, ['restricao', 'restrição'])
-    || toBooleanKeyword(registro.tem_restricao, ['restricao', 'restrição'])
-    || String(registro.motivo ?? '').toLowerCase().includes('restri')
-    || String(registro.status_triagem ?? '').toLowerCase().includes('restri')
 }
 
 const getDataAgendaRawItem = (item: Record<string, unknown>): string | null => {
@@ -831,7 +834,8 @@ export const roteirizacaoService = {
       }
       const itensDoManifesto = itensM7PorManifesto[manifestoId] ?? []
       const exclusivoManifesto = temSinalizacaoExclusiva(manifestoRaw) || itensDoManifesto.some((item) => temSinalizacaoExclusiva(item))
-      const agendamentoManifesto = temSinalizacaoAgendamento(manifestoRaw) || itensDoManifesto.some((item) => temSinalizacaoAgendamento(item))
+      const agendamentoManifestoDetalhado = temSinalizacaoAgendamentoDetalhada(manifestoRaw)
+      const agendamentoManifesto = agendamentoManifestoDetalhado.valor || itensDoManifesto.some((item) => temSinalizacaoAgendamento(item))
       const restricaoManifesto = temSinalizacaoRestricao(manifestoRaw) || itensDoManifesto.some((item) => temSinalizacaoRestricao(item))
       const perfilManifesto = toText(
         manifestoRaw.perfil_final_m6_2
@@ -888,6 +892,8 @@ export const roteirizacaoService = {
               exclusivo: exclusivoManifesto,
               agendada: agendamentoManifesto,
               restricao: restricaoManifesto,
+              origem_exclusivo: exclusivoManifesto ? 'campo' : 'ausente',
+              origem_agendada: agendamentoManifesto ? (agendamentoManifestoDetalhado.valor ? agendamentoManifestoDetalhado.origem : 'campo') : 'ausente',
             },
           },
         } : {}),
@@ -918,7 +924,8 @@ export const roteirizacaoService = {
         return { value: null, reason: 'Item sem ordem_parada_m7/ordem_entrega_parada_m7' }
       }
       const exclusivoItem = temSinalizacaoExclusiva(item)
-      const agendamentoItem = temSinalizacaoAgendamento(item)
+      const agendamentoItemDetalhado = temSinalizacaoAgendamentoDetalhada(item)
+      const agendamentoItem = agendamentoItemDetalhado.valor
       const restricaoItem = temSinalizacaoRestricao(item)
       return { value: {
         rodada_id: rodadaId,
@@ -952,6 +959,8 @@ export const roteirizacaoService = {
               exclusivo: exclusivoItem,
               agendada: agendamentoItem,
               restricao: restricaoItem,
+              origem_exclusivo: exclusivoItem ? 'campo' : 'ausente',
+              origem_agendada: agendamentoItem ? agendamentoItemDetalhado.origem : 'ausente',
             },
           },
         } : {}),
