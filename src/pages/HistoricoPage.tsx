@@ -124,14 +124,22 @@ const coletarTextosRegistro = (registro: Record<string, unknown>): string[] => {
   return coletados
 }
 
-const isTruthyFlag = (valor: unknown): boolean => {
+const isTruthyBase = (valor: unknown): boolean => {
   if (typeof valor === 'boolean') return valor
   const texto = normalizarTextoBusca(valor)
   if (!texto) return false
-  return ['1', 'true', 'sim', 's', 'y', 'yes', 'exclusivo', 'agendado', 'restricao'].includes(texto)
+  return ['1', 'true', 'sim', 's', 'y', 'yes', 'ok'].includes(texto)
 }
 
 type EspecificidadeVisual = 'normal' | 'redespacho' | 'exclusivo' | 'agendada' | 'restricao' | 'multipla'
+type OrigemFlag = 'campo' | 'fallback' | 'data_janela' | 'ausente'
+type DiagnosticoFlags = {
+  exclusivo: boolean
+  agendada: boolean
+  restricao: boolean
+  origemExclusivo: OrigemFlag
+  origemAgendada: OrigemFlag
+}
 
 const getByPath = (source: Record<string, unknown>, path: string | string[]): unknown => {
   const keys = Array.isArray(path) ? path : path.split('.')
@@ -145,9 +153,9 @@ const temCampoVerdadeiro = (registro: Record<string, unknown>, campos: string[])
   const registroExpandido = juntarRegistrosAninhados(registro)
   return campos.some((campo) => {
     if (campo.includes('.')) {
-      return isTruthyFlag(getByPath(registroExpandido, campo))
+      return isTruthyBase(getByPath(registroExpandido, campo))
     }
-    return isTruthyFlag(registroExpandido[campo])
+    return isTruthyBase(registroExpandido[campo])
   })
 }
 
@@ -161,14 +169,19 @@ const temTextoIndicativo = (registro: Record<string, unknown>, termos: string[],
   })
 }
 
-const temAgendamento = (registro: Record<string, unknown>): boolean => {
+const isTruthyExclusivo = (valor: unknown): boolean => isTruthyBase(valor) || ['exclusivo', 'dedicado'].includes(normalizarTextoBusca(valor))
+const isTruthyAgendamento = (valor: unknown): boolean => isTruthyBase(valor) || ['agendado', 'agendada'].includes(normalizarTextoBusca(valor))
+const isTruthyRestricao = (valor: unknown): boolean => isTruthyBase(valor) || ['restricao', 'restrição'].includes(normalizarTextoBusca(valor))
+
+const temAgendamento = (registro: Record<string, unknown>): { valor: boolean; origem: OrigemFlag } => {
   const registroExpandido = juntarRegistrosAninhados(registro)
-  if (isTruthyFlag(registroExpandido.agendada) || isTruthyFlag(registroExpandido.agendado)) return true
-  if (temCampoVerdadeiro(registroExpandido, ['sinalizacao_visual.agendada'])) return true
-  return CAMPOS_AGENDAMENTO_DATA.some((campo) => {
+  if (isTruthyAgendamento(registroExpandido.agendada) || isTruthyAgendamento(registroExpandido.agendado)) return { valor: true, origem: 'campo' }
+  if (isTruthyAgendamento(getByPath(registroExpandido, 'sinalizacao_visual.agendada'))) return { valor: true, origem: 'campo' }
+  const temData = CAMPOS_AGENDAMENTO_DATA.some((campo) => {
     const valor = registroExpandido[campo]
     return temTextoValido(valor)
   })
+  return temData ? { valor: true, origem: 'data_janela' } : { valor: false, origem: 'ausente' }
 }
 
 const pegarPrimeiroTexto = (registro: Record<string, unknown>, campos: Array<string | string[]>): string | null => {
@@ -228,7 +241,7 @@ const ehRedespacho = (registro: Record<string, unknown>): boolean => {
   if (normalizarTexto(registroExpandido.tipo_manifesto) === 'redespacho') return true
   if (normalizarTexto(registroExpandido.tipo_operacao_manifesto) === 'redespacho') return true
   if (normalizarTexto(registroExpandido.origem_etapa) === '4a_redespacho') return true
-  if (isTruthyFlag(registroExpandido.redespacho_flag)) return true
+  if (isTruthyBase(registroExpandido.redespacho_flag)) return true
   if (temTextoValido(registroExpandido.redespacho_codigo)) return true
   if (temTextoValido(registroExpandido.payload_apoio_json && typeof registroExpandido.payload_apoio_json === 'object' ? (registroExpandido.payload_apoio_json as Record<string, unknown>).redespacho_codigo : undefined)) return true
   if (normalizarTexto(getByPath(registroExpandido, 'payload_apoio_json.tipo_operacao')) === 'redespacho') return true
@@ -263,19 +276,33 @@ const obterDataHoraAgendamento = (item: ManifestoItemRoteirizacao): { data: stri
 }
 
 const obterEspecificidadeVisual = (registro: Record<string, unknown>): EspecificidadeVisual => {
+  const { especificidade } = obterDiagnosticoEspecificidade(registro)
+  return especificidade
+}
+
+const obterDiagnosticoEspecificidade = (registro: Record<string, unknown>): { especificidade: EspecificidadeVisual; diagnostico: DiagnosticoFlags } => {
   const registroExpandido = juntarRegistrosAninhados(registro)
-  if (ehRedespacho(registroExpandido)) return 'redespacho'
-  const exclusivo = temCampoVerdadeiro(registroExpandido, CAMPOS_EXCLUSIVO)
-    || temTextoIndicativo(registroExpandido, ['exclusiv', 'dedicad'], ['nao exclusiv'])
-  const agendada = temAgendamento(registroExpandido)
-  const restricao = temCampoVerdadeiro(registroExpandido, CAMPOS_RESTRICAO)
+  if (ehRedespacho(registroExpandido)) return { especificidade: 'redespacho', diagnostico: { exclusivo: false, agendada: false, restricao: false, origemExclusivo: 'ausente', origemAgendada: 'ausente' } }
+  const exclusivo = CAMPOS_EXCLUSIVO.some((campo) => isTruthyExclusivo(getByPath(registroExpandido, campo)))
+  const agendamento = temAgendamento(registroExpandido)
+  const restricao = CAMPOS_RESTRICAO.some((campo) => isTruthyRestricao(getByPath(registroExpandido, campo)))
     || temTextoIndicativo(registroExpandido, ['restri'], ['sem restri', 'nao restri'])
-  const total = [exclusivo, agendada, restricao].filter(Boolean).length
-  if (total > 1) return 'multipla'
-  if (exclusivo) return 'exclusivo'
-  if (agendada) return 'agendada'
-  if (restricao) return 'restricao'
-  return 'normal'
+  const total = [exclusivo, agendamento.valor, restricao].filter(Boolean).length
+  const diagnostico: DiagnosticoFlags = {
+    exclusivo,
+    agendada: agendamento.valor,
+    restricao,
+    origemExclusivo: exclusivo ? 'campo' : 'ausente',
+    origemAgendada: agendamento.origem,
+  }
+  const manifestoId = String(registroExpandido.manifesto_id ?? '-')
+  const documento = String(registroExpandido.nro_documento ?? '-')
+  console.log('[DIAG_SINALIZACAO_ITEM]', { manifesto_id: manifestoId, documento, flag_exclusivo_origem: diagnostico.origemExclusivo, flag_agendada_origem: diagnostico.origemAgendada, exclusivo, agendada: agendamento.valor, restricao })
+  if (total > 1) return { especificidade: 'multipla', diagnostico }
+  if (exclusivo) return { especificidade: 'exclusivo', diagnostico }
+  if (agendamento.valor) return { especificidade: 'agendada', diagnostico }
+  if (restricao) return { especificidade: 'restricao', diagnostico }
+  return { especificidade: 'normal', diagnostico }
 }
 
 const estiloEspecificidade: Record<EspecificidadeVisual, { marcador: string; fundo: string; badge: string; legenda: string }> = {
@@ -756,10 +783,10 @@ export function HistoricoPage() {
   ), [manifestos])
 
   const itensComSinalizacao = useMemo(() => (
-    itensManifesto.map((item) => ({
-      item,
-      especificidade: obterEspecificidadeVisual(item as unknown as Record<string, unknown>),
-    }))
+    itensManifesto.map((item) => {
+      const { especificidade, diagnostico } = obterDiagnosticoEspecificidade(item as unknown as Record<string, unknown>)
+      return { item, especificidade, diagnostico }
+    })
   ), [itensManifesto])
 
   const resumoOperacional = useMemo(() => {
@@ -1412,12 +1439,17 @@ export function HistoricoPage() {
                   <table className="w-full text-sm">
                     <thead className="border-b"><tr><th className="text-left py-2">Tipo</th><th className="text-left py-2">Sequência</th><th className="text-left">Documento</th><th className="text-left">Destinatário</th><th className="text-left">Cidade</th><th className="text-left">UF</th><th className="text-left">Peso</th><th className="text-left">Janela</th><th className="text-left">Ações</th></tr></thead>
                     <tbody>
-                      {itensComSinalizacao.map(({ item, especificidade }, index) => (
+                      {itensComSinalizacao.map(({ item, especificidade, diagnostico }, index) => (
                         <tr key={item.id} className={`border-b ${estiloEspecificidade[especificidade].fundo}`}>
                           <td className="py-2">
                             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${estiloEspecificidade[especificidade].badge}`}>
                               {estiloEspecificidade[especificidade].legenda}
                             </span>
+                            {especificidade === 'multipla' && (
+                              <p className="text-[10px] text-gray-600 mt-1">
+                                {[diagnostico.agendada ? 'Agendada' : null, diagnostico.exclusivo ? 'Exclusivo' : null, diagnostico.restricao ? 'Restrição' : null].filter(Boolean).join(' + ')}
+                              </p>
+                            )}
                           </td>
                           <td className="py-2">{item.sequencia}</td>
                           <td>{item.nro_documento || '—'}</td>
