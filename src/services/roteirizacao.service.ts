@@ -870,8 +870,17 @@ export const roteirizacaoService = {
         qtd_entregas: Math.trunc(toNumber(manifestoRaw.qtd_itens_final_m6_2, 0)),
         qtd_clientes: Math.trunc(toNumber(manifestoRaw.qtd_paradas_final_m6_2, 0)),
         frete_minimo: null,
-        origem_modulo: pickFirstText(manifestoRaw.origem_manifesto_modulo),
-        tipo_manifesto: pickFirstText(manifestoRaw.origem_manifesto_tipo),
+        origem_modulo: pickFirstText(
+          manifestoRaw.origem_manifesto_modulo,
+          manifestoRaw.origem_modulo,
+          manifestoRaw.origem_etapa,
+        ),
+        tipo_manifesto: pickFirstText(
+          manifestoRaw.tipo_operacao_manifesto,
+          manifestoRaw.tipo_manifesto,
+          manifestoRaw.origem_manifesto_tipo,
+          manifestoRaw.origem_etapa,
+        ),
         ...(inserirPayloadManifesto ? {
           payload_apoio_json: {
             ...manifestoRaw,
@@ -1711,12 +1720,37 @@ export const roteirizacaoService = {
   },
 
   async recalcularFretesManifestosRodada(rodadaId: string): Promise<void> {
-    const { data: manifestos, error } = await supabase.from('manifestos_roteirizacao').select('manifesto_id, rota_google_id').eq('rodada_id', rodadaId).order('manifesto_id')
+    const { data: manifestos, error } = await supabase.from('manifestos_roteirizacao').select('manifesto_id, rota_google_id, tipo_manifesto, payload_apoio_json').eq('rodada_id', rodadaId).order('manifesto_id')
     if (error) throw error
     for (const manifesto of manifestos ?? []) {
+      const manifestoId = String(manifesto.manifesto_id)
+      const payloadApoio = manifesto.payload_apoio_json && typeof manifesto.payload_apoio_json === 'object'
+        ? manifesto.payload_apoio_json as Record<string, unknown>
+        : {}
+      const ehRedespacho = manifestoId.startsWith('RD_')
+        || String(manifesto.tipo_manifesto ?? '').trim().toLowerCase() === 'redespacho'
+        || String(payloadApoio.tipo_manifesto ?? '').trim().toLowerCase() === 'redespacho'
+        || String(payloadApoio.tipo_operacao_manifesto ?? payloadApoio.tipo_operacao ?? '').trim().toLowerCase() === 'redespacho'
+      if (ehRedespacho) {
+        const payloadRedespacho = {
+          frete_status: 'calculo_manual_necessario',
+          frete_minimo_valor: null,
+          km_frete: null,
+          fonte_km_frete: null,
+          frete_erro: 'Redespacho: rota de distribuição não aplicável.',
+          frete_minimo: 0,
+        }
+        const { error: updateError } = await supabase
+          .from('manifestos_roteirizacao')
+          .update(payloadRedespacho)
+          .eq('rodada_id', rodadaId)
+          .eq('manifesto_id', manifestoId)
+        if (updateError) throw updateError
+        continue
+      }
       try {
         let rotaGoogle: RotaManifestoGoogle | null = null
-        const rotaDireta = await supabase.from('rotas_manifestos_google').select('*').eq('rodada_id', rodadaId).eq('manifesto_id', String(manifesto.manifesto_id)).maybeSingle()
+        const rotaDireta = await supabase.from('rotas_manifestos_google').select('*').eq('rodada_id', rodadaId).eq('manifesto_id', manifestoId).maybeSingle()
         if (rotaDireta.error) throw rotaDireta.error
         rotaGoogle = (rotaDireta.data as RotaManifestoGoogle | null) ?? null
         if (!rotaGoogle && manifesto.rota_google_id) {
@@ -1724,7 +1758,7 @@ export const roteirizacaoService = {
           if (rotaPorId.error) throw rotaPorId.error
           rotaGoogle = (rotaPorId.data as RotaManifestoGoogle | null) ?? null
         }
-        await this.atualizarFreteManifesto(rodadaId, String(manifesto.manifesto_id), rotaGoogle)
+        await this.atualizarFreteManifesto(rodadaId, manifestoId, rotaGoogle)
       } catch (err) { console.warn('[FRETE MINIMO] erro por manifesto', { rodada_id: rodadaId, manifesto_id: manifesto.manifesto_id, err }) }
     }
   },
@@ -1860,11 +1894,27 @@ export const roteirizacaoService = {
   async calcularRotasGoogleRodada(rodadaId: string): Promise<void> {
     const { data: manifestos, error } = await supabase
       .from('manifestos_roteirizacao')
-      .select('manifesto_id')
+      .select('manifesto_id, tipo_manifesto, payload_apoio_json')
       .eq('rodada_id', rodadaId)
       .order('manifesto_id')
     if (error) throw error
-    const fila = (manifestos ?? []).map((m) => String(m.manifesto_id))
+    const fila = (manifestos ?? [])
+      .filter((m) => {
+        const manifestoId = String(m.manifesto_id)
+        const payloadApoio = m.payload_apoio_json && typeof m.payload_apoio_json === 'object'
+          ? m.payload_apoio_json as Record<string, unknown>
+          : {}
+        const ehRedespacho = manifestoId.startsWith('RD_')
+          || String(m.tipo_manifesto ?? '').trim().toLowerCase() === 'redespacho'
+          || String(payloadApoio.tipo_manifesto ?? '').trim().toLowerCase() === 'redespacho'
+          || String(payloadApoio.tipo_operacao_manifesto ?? payloadApoio.tipo_operacao ?? '').trim().toLowerCase() === 'redespacho'
+        if (ehRedespacho) {
+          console.log('[GOOGLE ROUTES] manifesto redespacho ignorado', { rodada_id: rodadaId, manifesto_id: manifestoId })
+          return false
+        }
+        return true
+      })
+      .map((m) => String(m.manifesto_id))
     for (let i = 0; i < fila.length; i += MAX_CONCORRENCIA_ROTAS_GOOGLE) {
       const lote = fila.slice(i, i + MAX_CONCORRENCIA_ROTAS_GOOGLE)
       await Promise.all(lote.map(async (manifestoId) => {

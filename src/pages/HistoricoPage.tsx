@@ -131,7 +131,7 @@ const isTruthyFlag = (valor: unknown): boolean => {
   return ['1', 'true', 'sim', 's', 'y', 'yes', 'exclusivo', 'agendado', 'restricao'].includes(texto)
 }
 
-type EspecificidadeVisual = 'normal' | 'exclusivo' | 'agendada' | 'restricao' | 'multipla'
+type EspecificidadeVisual = 'normal' | 'redespacho' | 'exclusivo' | 'agendada' | 'restricao' | 'multipla'
 
 const getByPath = (source: Record<string, unknown>, path: string | string[]): unknown => {
   const keys = Array.isArray(path) ? path : path.split('.')
@@ -220,6 +220,22 @@ const pegarInfoAgenda = (registro: Record<string, unknown>): string | null => (
   ])
 )
 
+
+const ehRedespacho = (registro: Record<string, unknown>): boolean => {
+  const registroExpandido = juntarRegistrosAninhados(registro)
+  const manifestoId = String(registroExpandido.manifesto_id ?? '').trim().toUpperCase()
+  if (manifestoId.startsWith('RD_')) return true
+  if (normalizarTexto(registroExpandido.tipo_manifesto) === 'redespacho') return true
+  if (normalizarTexto(registroExpandido.tipo_operacao_manifesto) === 'redespacho') return true
+  if (normalizarTexto(registroExpandido.origem_etapa) === '4a_redespacho') return true
+  if (isTruthyFlag(registroExpandido.redespacho_flag)) return true
+  if (temTextoValido(registroExpandido.redespacho_codigo)) return true
+  if (temTextoValido(registroExpandido.payload_apoio_json && typeof registroExpandido.payload_apoio_json === 'object' ? (registroExpandido.payload_apoio_json as Record<string, unknown>).redespacho_codigo : undefined)) return true
+  if (normalizarTexto(getByPath(registroExpandido, 'payload_apoio_json.tipo_operacao')) === 'redespacho') return true
+  if (normalizarTexto(getByPath(registroExpandido, 'payload_apoio_json.tipo_manifesto')) === 'redespacho') return true
+  return false
+}
+
 const obterDataHoraAgendamento = (item: ManifestoItemRoteirizacao): { data: string; hora: string; info: string } => {
   const row = juntarRegistrosAninhados(item as unknown as Record<string, unknown>)
   const dataBase = [
@@ -248,6 +264,7 @@ const obterDataHoraAgendamento = (item: ManifestoItemRoteirizacao): { data: stri
 
 const obterEspecificidadeVisual = (registro: Record<string, unknown>): EspecificidadeVisual => {
   const registroExpandido = juntarRegistrosAninhados(registro)
+  if (ehRedespacho(registroExpandido)) return 'redespacho'
   const exclusivo = temCampoVerdadeiro(registroExpandido, CAMPOS_EXCLUSIVO)
     || temTextoIndicativo(registroExpandido, ['exclusiv', 'dedicad'], ['nao exclusiv'])
   const agendada = temAgendamento(registroExpandido)
@@ -263,6 +280,7 @@ const obterEspecificidadeVisual = (registro: Record<string, unknown>): Especific
 
 const estiloEspecificidade: Record<EspecificidadeVisual, { marcador: string; fundo: string; badge: string; legenda: string }> = {
   normal: { marcador: 'bg-transparent', fundo: 'bg-white', badge: 'bg-gray-100 text-gray-600', legenda: 'Normal' },
+  redespacho: { marcador: 'bg-purple-600', fundo: 'bg-purple-50/40', badge: 'bg-purple-100 text-purple-800', legenda: 'Redespacho' },
   exclusivo: { marcador: 'bg-blue-500', fundo: 'bg-blue-50/40', badge: 'bg-blue-100 text-blue-700', legenda: 'Veículo exclusivo' },
   agendada: { marcador: 'bg-amber-400', fundo: 'bg-amber-50/40', badge: 'bg-amber-100 text-amber-700', legenda: 'Agendada' },
   restricao: { marcador: 'bg-emerald-500', fundo: 'bg-emerald-50/40', badge: 'bg-emerald-100 text-emerald-700', legenda: 'Restrição de veículo' },
@@ -324,6 +342,22 @@ export function HistoricoPage() {
   const [filtroTipoAgendamento, setFiltroTipoAgendamento] = useState<'todos' | TipoAgendamentoOperacional>('todos')
   const [filtroManifestoAgendamento, setFiltroManifestoAgendamento] = useState('todos')
   const [filtroCidadeAgendamento, setFiltroCidadeAgendamento] = useState('todos')
+  const manifestoAtivoEhRedespacho = manifestoAtivo ? ehRedespacho(manifestoAtivo as unknown as Record<string, unknown>) : false
+  const manifestoAtivoPayload = manifestoAtivo?.payload_apoio_json && typeof manifestoAtivo.payload_apoio_json === 'object'
+    ? manifestoAtivo.payload_apoio_json as Record<string, unknown>
+    : null
+  const primeiroItemPayload = itensManifesto[0]?.payload_apoio_json && typeof itensManifesto[0].payload_apoio_json === 'object'
+    ? itensManifesto[0].payload_apoio_json as Record<string, unknown>
+    : null
+  const redespachoCodigo = textoSeguro(
+    manifestoAtivoPayload?.redespacho_codigo
+    ?? (manifestoAtivo as unknown as Record<string, unknown> | null)?.redespacho_codigo
+    ?? primeiroItemPayload?.redespacho_codigo
+  )
+  const redespachoTransportadora = textoSeguro(
+    manifestoAtivoPayload?.redespacho_transportadora_nome
+    ?? primeiroItemPayload?.redespacho_transportadora_nome
+  )
 
   useEffect(() => {
     const fetchRodadas = async () => {
@@ -1022,10 +1056,10 @@ export function HistoricoPage() {
           {!detalhesLoading && tabAtiva === 'manifestos' && (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
-                {(['exclusivo', 'agendada', 'restricao', 'multipla'] as EspecificidadeVisual[]).map((tipo) => (
+                {(['redespacho', 'exclusivo', 'agendada', 'restricao', 'multipla'] as EspecificidadeVisual[]).map((tipo) => (
                   <span key={tipo} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full ${estiloEspecificidade[tipo].badge}`}>
                     <span className={`w-2 h-2 rounded-full ${estiloEspecificidade[tipo].marcador}`} />
-                    {tipo === 'exclusivo' ? 'Azul = Exclusivo' : tipo === 'agendada' ? 'Amarelo = Agendada' : tipo === 'restricao' ? 'Verde = Restrição' : 'Vermelho = Múltiplas especificidades'}
+                    {tipo === 'redespacho' ? 'Roxo = Redespacho' : tipo === 'exclusivo' ? 'Azul = Exclusivo' : tipo === 'agendada' ? 'Amarelo = Agendada' : tipo === 'restricao' ? 'Verde = Restrição' : 'Vermelho = Múltiplas especificidades'}
                   </span>
                 ))}
               </div>
@@ -1350,6 +1384,14 @@ export function HistoricoPage() {
               <h3 className="text-lg font-semibold">Manifesto {manifestoAtivo.manifesto_id}</h3>
               <button className="px-3 py-1.5 text-sm rounded-lg bg-gray-100" onClick={fecharModalManifesto}>Fechar</button>
             </div>
+            {manifestoAtivoEhRedespacho && (
+              <div className="rounded-lg border border-purple-200 bg-purple-50/60 p-3 text-sm space-y-2">
+                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-purple-100 text-purple-800">REDESPACHO</span>
+                <p><strong>Código:</strong> {redespachoCodigo}</p>
+                <p><strong>Transportadora parceira:</strong> {redespachoTransportadora}</p>
+                <p className="text-purple-900">Redespacho: coleta na filial pela transportadora parceira. Sequenciamento de distribuição não aplicável.</p>
+              </div>
+            )}
 
             <div className="grid md:grid-cols-4 gap-3 text-sm">
               <div><span className="text-gray-500 block">Manifesto</span><strong>{manifestoAtivo.manifesto_id}</strong></div>
@@ -1392,6 +1434,11 @@ export function HistoricoPage() {
                 </div>
                 <div className="border border-gray-200 rounded-lg p-3 space-y-3">
                   <h4 className="text-sm font-semibold text-gray-800">Distância Google Maps</h4>
+                  {manifestoAtivoEhRedespacho && (
+                    <div className="rounded border border-purple-200 bg-purple-50 p-2 text-sm text-purple-800">
+                      Redespacho não possui rota de entrega no sistema. A coleta será feita na filial pela transportadora parceira.
+                    </div>
+                  )}
                   {!rotaGoogleManifesto ? (
                     <div className="text-sm text-gray-600">Distância Google Maps: pendente</div>
                   ) : (
@@ -1477,16 +1524,16 @@ export function HistoricoPage() {
                   <button disabled={itensManifesto.length === 0} onClick={desfazerSequencia} className="px-4 py-2 text-sm rounded-lg bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">Desfazer</button>
                   <button disabled={!manifestoAtivo} onClick={() => void exportarManifestoPdf()} className="px-4 py-2 text-sm rounded-lg bg-purple-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">Exportar PDF</button>
                   <button
-                    disabled={!rodadaSelecionada || !manifestoAtivo}
+                    disabled={!rodadaSelecionada || !manifestoAtivo || manifestoAtivoEhRedespacho}
                     onClick={() => navigate(`/rotas?rodada_id=${rodadaSelecionada.id}&manifesto_id=${manifestoAtivo.manifesto_id}`)}
                     className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    Ver rota no mapa
+                    {manifestoAtivoEhRedespacho ? 'Rota não aplicável (redespacho)' : 'Ver rota no mapa'}
                   </button>
                   <button
-                    disabled={!rodadaSelecionada || !manifestoAtivo}
+                    disabled={!rodadaSelecionada || !manifestoAtivo || manifestoAtivoEhRedespacho}
                     onClick={async () => {
-                      if (!rodadaSelecionada || !manifestoAtivo) return
+                      if (!rodadaSelecionada || !manifestoAtivo || manifestoAtivoEhRedespacho) return
                       const rota = await roteirizacaoService.calcularRotaGoogleManifesto(rodadaSelecionada.id, manifestoAtivo.manifesto_id)
                       setRotaGoogleManifesto(rota)
                     }}
