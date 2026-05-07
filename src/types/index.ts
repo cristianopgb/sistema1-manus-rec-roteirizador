@@ -263,6 +263,8 @@ export interface CarteiraCargaContratoMotor {
 export interface RespostaMotor {
   status: 'ok' | 'sucesso' | 'erro' | 'parcial'
   mensagem?: string
+  erro_tecnico?: string
+  detalhe_tecnico?: string
   pipeline_real_ate?: string
   modo_resposta?: string
   resposta_truncada?: boolean
