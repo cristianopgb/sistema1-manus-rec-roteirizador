@@ -317,7 +317,6 @@ export const carteiraUploadService = {
     const headerRowIndex = detectHeaderRow(rows)
     const headerRaw = validarCabecalho(rows[headerRowIndex] ?? [])
 
-    const redespachoColIndex = DATASET_COLUNAS_BRUTAS.indexOf('Redespacho')
     let linhasIgnoradasCabecalhoRedespacho = 0
 
     const mappedRows = rows
@@ -349,10 +348,7 @@ export const carteiraUploadService = {
           }
         })
 
-        const redespachoAddress = XLSX.utils.encode_cell({ r: headerRowIndex + index + 1, c: redespachoColIndex })
-        const redespachoCell = worksheet[redespachoAddress]
-        // Preferimos o valor formatado (`w`) para preservar zeros à esquerda quando a célula foi formatada como texto no Excel.
-        const redespachoTexto = normalizarCodigoRedespacho(redespachoCell?.w ?? rawObject.Redespacho)
+        const redespachoTexto = normalizarCodigoRedespacho(rawObject.Redespacho)
         mapped.redespacho_codigo = redespachoTexto || null
         mapped.redespacho_flag = Boolean(redespachoTexto)
         mapped.redespacho_transportadora_id = null
@@ -377,6 +373,18 @@ export const carteiraUploadService = {
       })
 
     console.log('[UPLOAD REDESPACHO] linhas ignoradas por cabeçalho redespacho:', linhasIgnoradasCabecalhoRedespacho)
+    const redespachosPreview = mappedRows
+      .filter((row) => row.redespacho_flag === true && typeof row.redespacho_codigo === 'string' && row.redespacho_codigo.trim())
+      .map((row) => ({
+        linha_numero: row.linha_numero,
+        nro_doc: row.nro_doc,
+        destin: row.destin,
+        cidade: row.cidade,
+        redespacho_codigo: row.redespacho_codigo,
+      }))
+
+    console.log('[UPLOAD REDESPACHO] total linhas marcadas:', redespachosPreview.length)
+    console.table(redespachosPreview.slice(0, 50))
 
     const totalLinhasImportadas = mappedRows.length
     const preview = mappedRows.slice(0, 5).map((item) => {
