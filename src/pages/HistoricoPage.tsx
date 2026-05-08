@@ -77,10 +77,13 @@ const normalizarTexto = (valor: unknown): string => String(valor ?? '').trim().t
 const normalizarTextoBusca = (valor: unknown): string => normalizarTexto(valor)
   .normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '')
+const PLACEHOLDER_AGENDAMENTO_REGEX = /^agendamento para\s*:?\s*(?:-|—|null|nat)?$/
 const temTextoValido = (valor: unknown): boolean => {
   const texto = normalizarTextoBusca(valor)
   if (!texto) return false
-  return !['nat', 'null', 'undefined', '-', '—', 'na', 'n/a', 'sem agendamento', 'nao agendado'].includes(texto)
+  if (['nat', 'null', 'undefined', '-', '—', 'na', 'n/a', 'sem agendamento', 'nao agendado'].includes(texto)) return false
+  if (PLACEHOLDER_AGENDAMENTO_REGEX.test(texto)) return false
+  return true
 }
 
 const juntarRegistrosAninhados = (registro: Record<string, unknown>): Record<string, unknown> => {
@@ -727,23 +730,49 @@ export function HistoricoPage() {
       || pickFirstArrayLength(respostaMotor, ['cargas_excecao_triagem', 'remanescentes.excecoes_triagem'])
       || 0
 
+    const agendaVencidaBase = remanescentesNaoRoteirizaveis.filter((item) => (
+      possuiTexto(item.etapa_origem, ['agenda_vencida'])
+      || possuiTexto(item.motivo, ['agenda vencida'])
+      || possuiTexto(item.motivo_triagem, ['agenda vencida'])
+      || possuiTexto(item.status_triagem, ['agenda vencida'])
+    )).length
+
+    const agendaVencida = agendaVencidaBase || pickFirstInt(estatisticasRaw, ['agenda_vencida'])
+      || pickFirstInt(resumoNegocio, ['agenda_vencida', 'carteira_agendas_vencidas'])
+      || pickFirstInt(resumoExecucao, ['agenda_vencida', 'carteira_agendas_vencidas'])
+      || pickFirstArrayLength(respostaMotor, ['cargas_agendas_vencidas', 'remanescentes.agendas_vencidas'])
+      || 0
+
     const naoRoteirizadosTotal = Math.max(0, totalCarteira - itensRoteirizados)
-    const classificadosSemOutros = saldoFinalRoteirizavel + naoRoteirizaveisTriagem + agendamentoFuturo + aguardandoAgendamento + excecoesTriagem
-    let outrosNaoClassificados = naoRoteirizadosTotal - classificadosSemOutros
+    const somaPrincipal = saldoFinalRoteirizavel + naoRoteirizaveisTriagem
+    let outrosNaoClassificados = naoRoteirizadosTotal - somaPrincipal
+    const somaDetalheM3 = excecoesTriagem + agendamentoFuturo + agendaVencida + aguardandoAgendamento
+
+    console.log('[ESTATISTICAS] composição não roteirizados', {
+      total_nao_roteirizados: naoRoteirizadosTotal,
+      saldo_final_roteirizacao: saldoFinalRoteirizavel,
+      nao_roteirizaveis_m3: naoRoteirizaveisTriagem,
+      detalhe_nao_roteirizaveis_m3: {
+        excecoes_triagem: excecoesTriagem,
+        agendamento_futuro: agendamentoFuturo,
+        agenda_vencida: agendaVencida,
+        aguardando_agendamento: aguardandoAgendamento,
+      },
+      soma_principal: somaPrincipal,
+      soma_detalhe_m3: somaDetalheM3,
+    })
 
     if (outrosNaoClassificados < 0) {
       console.warn('[ESTATISTICAS] composição dos não roteirizados excedeu o total', {
         naoRoteirizadosTotal,
         saldoFinalRoteirizavel,
         naoRoteirizaveisTriagem,
-        agendamentoFuturo,
-        aguardandoAgendamento,
-        excecoesTriagem,
+        somaPrincipal,
       })
       outrosNaoClassificados = 0
     }
 
-    const totalClassificado = itensRoteirizados + saldoFinalRoteirizavel + naoRoteirizaveisTriagem + agendamentoFuturo + aguardandoAgendamento + excecoesTriagem + outrosNaoClassificados
+    const totalClassificado = itensRoteirizados + saldoFinalRoteirizavel + naoRoteirizaveisTriagem + outrosNaoClassificados
     const diferencaClassificacao = totalCarteira - totalClassificado
 
     return {
