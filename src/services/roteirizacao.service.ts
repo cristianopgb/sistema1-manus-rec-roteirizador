@@ -508,11 +508,15 @@ const toBooleanKeyword = (value: unknown, keywords: string[]): boolean => {
   return keywords.includes(text)
 }
 
+const PLACEHOLDER_AGENDAMENTO_REGEX = /^agendamento para\s*:?\s*(?:-|—|null|nat)?$/
+
 const hasNonEmptyText = (value: unknown): boolean => {
   if (typeof value !== 'string') return false
   const text = value.trim().toLowerCase()
   if (!text) return false
-  return !['nat', 'null', 'undefined', '-', '—', 'na', 'n/a', 'sem agendamento', 'nao agendado'].includes(text)
+  if (['nat', 'null', 'undefined', '-', '—', 'na', 'n/a', 'sem agendamento', 'nao agendado'].includes(text)) return false
+  if (PLACEHOLDER_AGENDAMENTO_REGEX.test(text)) return false
+  return true
 }
 
 type OrigemSinalizacao = 'campo' | 'fallback' | 'data_janela' | 'ausente'
