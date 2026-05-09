@@ -801,8 +801,20 @@ export function HistoricoPage() {
   }, [estatisticas, manifestos, remanescentesNormalizados, rodadaSelecionada])
 
   const itensAgendados = useMemo(() => (
-    itensManifesto.filter((item) => temAgendamento(item as unknown as Record<string, unknown>))
+    itensManifesto.filter((item) => temAgendamento(item as unknown as Record<string, unknown>).valor)
   ), [itensManifesto])
+
+  useEffect(() => {
+    console.log('[AGENDA MODAL] itens_agendados', {
+      manifesto_id: manifestoAtivo?.manifesto_id,
+      total_itens: itensManifesto.length,
+      total_agendados: itensAgendados.length,
+      exemplos: itensAgendados.slice(0, 5).map((item) => ({
+        documento: item.nro_documento,
+        agendamento: temAgendamento(item as unknown as Record<string, unknown>),
+      })),
+    })
+  }, [itensAgendados, itensManifesto, manifestoAtivo])
 
   const manifestosComSinalizacao = useMemo(() => (
     manifestos.map((manifesto) => ({
@@ -909,12 +921,11 @@ export function HistoricoPage() {
 
   const registrosAgendamentos = useMemo<AgendamentoOperacional[]>(() => {
     const resultado: AgendamentoOperacional[] = []
-    const textosAgendaVencida = ['agenda_vencida', 'agenda vencida', 'vencida']
-    const textosAgendaFutura = ['agendamento_futuro', 'agenda_futura', 'agenda futura', 'futura']
 
     itensManifestosRodada.forEach((item) => {
       const expandido = juntarRegistrosAninhados(item as unknown as Record<string, unknown>)
-      if (!temAgendamento(expandido)) return
+      const agendamento = temAgendamento(expandido)
+      if (!agendamento.valor) return
       resultado.push({
         tipo: 'roteirizado',
         documento: textoSeguro(item.nro_documento),
@@ -933,20 +944,30 @@ export function HistoricoPage() {
 
     remanescentes.forEach((remanescente) => {
       const expandido = juntarRegistrosAninhados(remanescente as unknown as Record<string, unknown>)
-      const textos = coletarTextosRegistro(expandido)
-      const temVencida = textos.some((texto) => textosAgendaVencida.some((termo) => texto.includes(termo)))
-        || normalizarTextoBusca(expandido.status_folga) === 'vencida'
-      const temFutura = textos.some((texto) => textosAgendaFutura.some((termo) => texto.includes(termo)))
+      const agendamento = temAgendamento(expandido)
+      const etapaOrigem = normalizarTextoBusca(expandido.etapa_origem)
+      const statusTriagem = normalizarTextoBusca(expandido.status_triagem)
+      const motivoTriagem = normalizarTextoBusca(expandido.motivo_triagem)
       const tipoNormalizado = normalizarTipoRemanescente(remanescente)
-      const ehRoteirizavelSemAtendimento = (
-        (remanescente.tipo_remanescente === 'roteirizavel_saldo_final' || remanescente.etapa_origem === 'saldo_final_roteirizacao' || tipoNormalizado === 'roteirizavel_saldo_final')
-        && temAgendamento(expandido)
-      )
+      const ehAgendaVencidaMotor = etapaOrigem.includes('agenda_vencida')
+        || statusTriagem.includes('agenda_vencida')
+        || motivoTriagem.includes('agenda_vencida')
+        || motivoTriagem.includes('agendada_com_folga_negativa')
+      const ehAgendamentoFuturoMotor = etapaOrigem.includes('agendamento_futuro')
+        || statusTriagem.includes('agendamento_futuro')
+        || statusTriagem.includes('agenda_futura')
+        || motivoTriagem.includes('agendada_com_folga_maior')
+        || motivoTriagem.includes('agendada_com_folga_igual_a_2')
 
       let tipo: TipoAgendamentoOperacional | null = null
-      if (temVencida) tipo = 'agenda_vencida'
-      else if (temFutura) tipo = 'agenda_futura'
-      else if (ehRoteirizavelSemAtendimento) tipo = 'roteirizavel_nao_atendido'
+      if (ehAgendaVencidaMotor && agendamento.valor) tipo = 'agenda_vencida'
+      else if (ehAgendamentoFuturoMotor && agendamento.valor) tipo = 'agenda_futura'
+      else if (
+        (remanescente.tipo_remanescente === 'roteirizavel_saldo_final'
+          || remanescente.etapa_origem === 'saldo_final_roteirizacao'
+          || tipoNormalizado === 'roteirizavel_saldo_final')
+        && agendamento.valor
+      ) tipo = 'roteirizavel_nao_atendido'
       if (!tipo) return
 
       resultado.push({
