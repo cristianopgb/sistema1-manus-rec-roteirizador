@@ -199,13 +199,13 @@ const mapVeiculoToMotor = (veiculo: Record<string, unknown>) => ({
 })
 
 const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): CarteiraCargaContratoMotor => {
-  const agendamOriginal = getFirstValue(item as unknown as Record<string, unknown>, ['agendam', 'Agendam.', 'data_agenda', 'agenda'])
-  const dleOriginal = getFirstValue(item as unknown as Record<string, unknown>, ['dle', 'D.L.E.', 'data_leadtime', 'data_limite', 'data_limite_entrega'])
+  const agendamOriginal = item.agendam
+  const dleOriginal = item.dle
   const inicioEntregaNormalizado = normalizeHorarioJanela(item.inicio_entrega)
   const fimEnNormalizado = normalizeHorarioJanela(item.fim_entrega)
   const dataDesNormalizada = normalizeDataDesDataNF(item.data_des)
   const dataNFNormalizada = normalizeDataDesDataNF(item.data_nf)
-  const dleNormalizada = normalizeDle(dleOriginal)
+  const dleNormalizada = normalizeDle(dleOriginal, { dataDes: item.data_des, dataNf: item.data_nf })
   const agendamNormalizada = normalizeAgendam(agendamOriginal)
   const peso = toPayloadNumber(item.peso)
   const pesoCalculo = toPayloadNumber(item.peso_calculo)
@@ -1275,6 +1275,16 @@ export const roteirizacaoService = {
     const dataBaseRoteirizacaoIso = toIsoCompleto(filtros.data_base)
     const dataExecucaoIso = new Date().toISOString()
     const carteiraContrato = carteira.map((item, index) => mapCarteiraItemToMotorContract(item, index))
+    console.log('[PAYLOAD DATAS DIAG]', carteiraContrato.slice(0, 10).map((item) => ({
+      nro_doc: item['Nro Doc.'],
+      data_des: item['Data Des'],
+      data_nf: item['Data NF'],
+      dle: item['D.L.E.'],
+      agendam: item['Agendam.'],
+      conf: item['Conf'],
+      peso_calculo: item['Peso Calculo'],
+    })))
+
     if (import.meta.env.DEV && carteiraContrato.length > 0) {
       const exemplo = carteiraContrato[0] as Record<string, unknown>
       console.log('[PAYLOAD NUMERICO] exemplo item carteira:', {

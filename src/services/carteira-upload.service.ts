@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 import { CarteiraCarga } from '@/types'
+import { normalizeAgendam, normalizeDataDesDataNF, normalizeDle } from '@/lib/date-normalizers'
 
 type DatasetColumnDef = {
   slot: string
@@ -318,10 +319,17 @@ export const carteiraUploadService = {
           dados_originais_json: rawObject,
         }
 
-        DATASET_LAYOUT_DEFINITIVO.forEach((slotDef) => {
+        const rawCellsBySlot: Record<string, { v: unknown; w: unknown } | null> = {}
+
+        DATASET_LAYOUT_DEFINITIVO.forEach((slotDef, slotIndex) => {
           if (!slotDef.target) return
           const target = slotDef.target
           const rawValue = rawObject[slotDef.slot]
+          const cellIndex = validHeaderCells[slotIndex]?.index ?? slotIndex
+          const worksheetRowIndex = headerRowIndex + index + 1
+          const cellRef = XLSX.utils.encode_cell({ c: cellIndex, r: worksheetRowIndex })
+          const sheetCell = worksheet[cellRef]
+          rawCellsBySlot[slotDef.slot] = sheetCell ? { v: sheetCell.v, w: sheetCell.w } : null
 
           if (CAMPOS_NUMERICOS.has(target)) {
             mapped[target] = parseNumeric(rawValue)
@@ -333,6 +341,11 @@ export const carteiraUploadService = {
           }
         })
 
+        mapped.data_des = normalizeDataDesDataNF(mapped.data_des)
+        mapped.data_nf = normalizeDataDesDataNF(mapped.data_nf)
+        mapped.dle = normalizeDle(mapped.dle, { dataDes: mapped.data_des, dataNf: mapped.data_nf })
+        mapped.agendam = normalizeAgendam(mapped.agendam)
+
         mapped.palet = null
         mapped.status_r = null
         mapped.inicio_entrega = null
@@ -343,6 +356,14 @@ export const carteiraUploadService = {
         mapped.redespacho_flag = Boolean(redespachoTexto)
         mapped.redespacho_transportadora_id = null
         mapped.redespacho_transportadora_nome = null
+
+        mapped._date_diag = {
+          slot_dle: rawObject.dle,
+          target_dle: mapped.dle,
+          row_dle: rawObject.dle,
+          worksheet_dle_v: rawCellsBySlot.dle?.v ?? null,
+          worksheet_dle_w: rawCellsBySlot.dle?.w ?? null,
+        }
 
         return mapped
       })
@@ -359,8 +380,26 @@ export const carteiraUploadService = {
         delete cleanRow.linha_numero
         delete cleanRow.status_validacao
         delete cleanRow.dados_originais_json
+        delete (cleanRow as any)._date_diag
         return !isRowFullyEmpty(cleanRow)
       })
+
+    console.log('[UPLOAD DATE RAW DIAG]', mappedRows.slice(0, 10).map((row) => ({
+      linha_numero: row.linha_numero,
+      nro_doc: row.nro_doc,
+      slot_dle: (row as any)._date_diag?.slot_dle ?? null,
+      target_dle: (row as any)._date_diag?.target_dle ?? null,
+      valor_row_dle: (row as any)._date_diag?.row_dle ?? null,
+      worksheet_dle_v: (row as any)._date_diag?.worksheet_dle_v ?? null,
+      worksheet_dle_w: (row as any)._date_diag?.worksheet_dle_w ?? null,
+      data_des: row.data_des,
+      data_nf: row.data_nf,
+      agendam: row.agendam,
+      conf: row.conf,
+      peso_calculo: row.peso_calculo,
+    })))
+
+    mappedRows.forEach((row) => { delete (row as any)._date_diag })
 
     console.log('[UPLOAD REDESPACHO] linhas ignoradas por cabeçalho redespacho:', linhasIgnoradasCabecalhoRedespacho)
     const redespachosPreview = mappedRows
