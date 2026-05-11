@@ -31,7 +31,7 @@ const excelSerialToDate = (serial: number): Date => {
 
 const isNullLikeDateText = (text: string): boolean => {
   const normalized = text.trim().toLowerCase()
-  return ['', '-', 'nenhum', 'nan', 'nat', 'null', 'undefined'].includes(normalized)
+  return ['', '-', '—', 'nenhum', 'nan', 'nat', 'null', 'undefined'].includes(normalized)
 }
 
 const parseIsoDateText = (text: string): Date | null => {
@@ -112,18 +112,64 @@ const formatBrDateTime = (date: Date): string => {
   return `${formatBrDate(date)} ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(date.getUTCSeconds())}`
 }
 
+const extractYearFromDateLike = (value: unknown): number | null => {
+  const parsed = parseDateFromUnknown(value)
+  if (!parsed) return null
+  const year = parsed.getUTCFullYear()
+  return year >= 1900 && year <= 9999 ? year : null
+}
+
+const parseBrDateWith2DigitYear = (text: string, fallbackYear?: number | null): Date | null => {
+  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/)
+  if (!match) return null
+  const [, ddRaw, mmRaw, yyRaw] = match
+  const dd = Number(ddRaw)
+  const mm = Number(mmRaw)
+  const yy = Number(yyRaw)
+
+  if (yy === 20 && !fallbackYear) return null
+
+  const yyyy = yy === 20 && fallbackYear
+    ? fallbackYear
+    : (yy >= 70 ? 1900 + yy : 2000 + yy)
+  const date = new Date(Date.UTC(yyyy, mm - 1, dd, 0, 0, 0))
+  if (Number.isNaN(date.getTime())) return null
+  if (date.getUTCFullYear() !== yyyy || date.getUTCMonth() !== mm - 1 || date.getUTCDate() !== dd) return null
+  return date
+}
+
+const sanitizeAgendamText = (text: string): string => text.replace(/(\d{1,2}\/\d{1,2}\/\d{4})\s+0$/, '$1').trim()
+
 export const normalizeDataDesDataNF = (value: unknown): string | null => {
   const parsed = parseDateFromUnknown(value)
   return parsed ? formatIsoDateTime(parsed) : null
 }
 
-export const normalizeDle = (value: unknown): string | null => {
+export const normalizeDle = (
+  value: unknown,
+  context?: { dataDes?: unknown; dataNf?: unknown }
+): string | null => {
+  const text = toTrimmedText(value)
+  const contextYear = extractYearFromDateLike(context?.dataDes) ?? extractYearFromDateLike(context?.dataNf)
+
+  if (text && /^\d{1,2}\/\d{1,2}\/\d{2}$/.test(text)) {
+    const parsed2Digits = parseBrDateWith2DigitYear(text, contextYear)
+    if (parsed2Digits) return formatBrDate(parsed2Digits)
+
+    if (/^\d{1,2}\/\d{1,2}\/20$/.test(text) && !contextYear) {
+      console.warn('[NORMALIZE DLE DIAG] D.L.E. truncado sem ano de contexto confiável', { value, context })
+      return null
+    }
+  }
+
   const parsed = parseDateFromUnknown(value)
   return parsed ? formatBrDate(parsed) : null
 }
 
 export const normalizeAgendam = (value: unknown): string | null => {
-  const parsed = parseDateFromUnknown(value)
+  const text = toTrimmedText(value)
+  const sanitizedValue = text ? sanitizeAgendamText(text) : value
+  const parsed = parseDateFromUnknown(sanitizedValue)
   return parsed ? formatBrDateTime(parsed) : null
 }
 
