@@ -14,7 +14,7 @@ import {
   RotaManifestoGoogle, RotaManifestoParadaGoogle
 } from '@/types'
 import { normalizeHorarioJanela } from '@/lib/time-normalizers'
-import { normalizeForComparison } from './carteira-upload.service'
+import { isCodigoRedespachoValido, normalizeForComparison } from './carteira-upload.service'
 import {
   normalizeAgendam,
   normalizeDataDesDataNF,
@@ -1232,9 +1232,12 @@ export const roteirizacaoService = {
     const codigosRedespacho = Array.from(new Set(
       carteira
         .map((item) => typeof item.redespacho_codigo === 'string' ? item.redespacho_codigo.trim() : '')
-        .filter((codigo) => Boolean(codigo) && normalizeForComparison(codigo) !== 'redespacho')
+        .filter((codigo) => isCodigoRedespachoValido(codigo))
     ))
-    console.log('[REDESPACHO] total linhas com redespacho:', carteira.filter((item) => item.redespacho_flag === true && typeof item.redespacho_codigo === 'string' && item.redespacho_codigo.trim() && normalizeForComparison(item.redespacho_codigo) !== 'redespacho').length)
+    console.log('[REDESPACHO] total linhas com redespacho:', carteira.filter((item) =>
+      item.redespacho_flag === true
+      && isCodigoRedespachoValido(item.redespacho_codigo)
+    ).length)
     console.log('[REDESPACHO] códigos encontrados:', codigosRedespacho)
     let transportadorasRedespacho: Array<{ id: string; codigo: string; nome: string; ativo: boolean }> = []
     if (codigosRedespacho.length > 0) {
@@ -1252,8 +1255,9 @@ export const roteirizacaoService = {
       }
       carteira.forEach((item) => {
         const codigo = typeof item.redespacho_codigo === 'string' ? item.redespacho_codigo.trim() : ''
-        const encontrada = codigo ? mapa.get(codigo) : null
-        if (encontrada) {
+        const codigoValido = isCodigoRedespachoValido(codigo)
+        const encontrada = codigoValido ? mapa.get(codigo) : null
+        if (codigoValido && encontrada) {
           item.redespacho_flag = true
           item.redespacho_transportadora_id = encontrada.id
           item.redespacho_transportadora_nome = encontrada.nome

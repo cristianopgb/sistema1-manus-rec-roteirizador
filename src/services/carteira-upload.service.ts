@@ -152,10 +152,37 @@ const parseBoolean = (value: unknown): boolean | null => {
   return null
 }
 
+const REDESPACHO_PLACEHOLDERS = new Set([
+  '',
+  '-',
+  '—',
+  'null',
+  'nan',
+  'undefined',
+  'na',
+  'n/a',
+  'sem redespacho',
+  'sem-redespacho',
+  'redespacho',
+])
+
+export const isCodigoRedespachoValido = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false
+  const text = value.trim()
+  if (!text) return false
+  const normalized = normalizeForComparison(text)
+  return !REDESPACHO_PLACEHOLDERS.has(normalized)
+}
+
 const normalizarCodigoRedespacho = (value: unknown): string | null => {
   if (value === null || value === undefined) return null
+
   const text = String(value).trim()
-  return text ? text : null
+  if (!text) return null
+
+  if (!isCodigoRedespachoValido(text)) return null
+
+  return text
 }
 
 export function detectHeaderRow(rows: unknown[][]): number {
@@ -337,7 +364,10 @@ export const carteiraUploadService = {
 
     console.log('[UPLOAD REDESPACHO] linhas ignoradas por cabeçalho redespacho:', linhasIgnoradasCabecalhoRedespacho)
     const redespachosPreview = mappedRows
-      .filter((row) => row.redespacho_flag === true && typeof row.redespacho_codigo === 'string' && row.redespacho_codigo.trim())
+      .filter((row) => row.redespacho_flag === true
+        && typeof row.redespacho_codigo === 'string'
+        && row.redespacho_codigo.trim()
+        && normalizarCodigoRedespacho(row.redespacho_codigo) !== null)
       .map((row) => ({
         linha_numero: row.linha_numero,
         nro_doc: row.nro_doc,
