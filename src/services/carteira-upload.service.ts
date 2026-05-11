@@ -2,99 +2,57 @@ import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 import { CarteiraCarga } from '@/types'
 
-const DATASET_COLUNAS_BRUTAS = [
-  'Filial R',
-  'Romanei',
-  'Filial',
-  'Série D',
-  'Nro Do',
-  'Data D',
-  'Data N',
-  'D.L.E.',
-  'Agendam.',
-  'Palet',
-  'Conf',
-  'Peso',
-  'Vlr.Merc.',
-  'Qtd.',
-  'Peso Cub',
-  'Classifica',
-  'Tomad',
-  'Destina',
-  'Bairro',
-  'Cida',
-  'UF',
-  'NF/Ser',
-  'Tipo Carg',
-  'Qtd.NF',
-  'Mesoregião',
-  'Sub-Região',
-  'Ocorrências N',
-  'Remetente',
-  'Observação R',
-  'Ref Cliente',
-  'Cidade Dest.',
-  'Agenda',
-  'Tipo Carga',
-  'Última Ocorrê',
-  'Status Rom. O',
-  'Latitude',
-  'Longitude',
-  'Peso Calculo',
-  'Prioridade',
-  'Restrição Veíc',
-  'Carro Dedicado',
-  'Inicio Ent.',
-  'Fim En',
-  'Redespacho',
-] as const
-
-const MAPEAMENTO_FIXO: Record<(typeof DATASET_COLUNAS_BRUTAS)[number], string> = {
-  'Filial R': 'filial_r',
-  Romanei: 'romane',
-  Filial: 'filial_d',
-  'Série D': 'serie',
-  'Nro Do': 'nro_doc',
-  'Data D': 'data_des',
-  'Data N': 'data_nf',
-  'D.L.E.': 'dle',
-  'Agendam.': 'agendam',
-  Palet: 'palet',
-  Conf: 'conf',
-  Peso: 'peso',
-  'Vlr.Merc.': 'vlr_merc',
-  'Qtd.': 'qtd',
-  'Peso Cub': 'peso_cubico',
-  Classifica: 'classif',
-  Tomad: 'tomad',
-  Destina: 'destin',
-  Bairro: 'bairro',
-  Cida: 'cidade',
-  UF: 'uf',
-  'NF/Ser': 'nf_serie',
-  'Tipo Carg': 'tipo_carga',
-  'Qtd.NF': 'qtd_nf',
-  Mesoregião: 'mesoregiao',
-  'Sub-Região': 'sub_regiao',
-  'Ocorrências N': 'ocorrencias_nf',
-  Remetente: 'remetente',
-  'Observação R': 'observacao',
-  'Ref Cliente': 'ref_cliente',
-  'Cidade Dest.': 'cidade_dest',
-  Agenda: 'agenda',
-  'Tipo Carga': 'tipo_ca',
-  'Última Ocorrê': 'ultima_ocorrencia',
-  'Status Rom. O': 'status_r',
-  Latitude: 'latitude',
-  Longitude: 'longitude',
-  'Peso Calculo': 'peso_calculo',
-  Prioridade: 'prioridade',
-  'Restrição Veíc': 'restricao_veiculo',
-  'Carro Dedicado': 'carro_dedicado',
-  'Inicio Ent.': 'inicio_entrega',
-  'Fim En': 'fim_entrega',
-  Redespacho: 'redespacho_codigo',
+type DatasetColumnDef = {
+  slot: string
+  labels: string[]
+  target?: string
+  required?: boolean
+  ignore?: boolean
 }
+
+const DATASET_LAYOUT_DEFINITIVO: DatasetColumnDef[] = [
+  { slot: 'filial_romaneio', labels: ['Filial Romaneio'], target: 'filial_r', required: true },
+  { slot: 'romaneio', labels: ['Romaneio'], target: 'romane', required: true },
+  { slot: 'filial_doc', labels: ['Filial Doc'], target: 'filial_d', required: true },
+  { slot: 'serie_doc', labels: ['Serie Doc', 'Série Doc'], target: 'serie', required: true },
+  { slot: 'nro_doc', labels: ['Nro Doc'], target: 'nro_doc', required: true },
+  { slot: 'data_desc', labels: ['Data Desc'], target: 'data_des', required: true },
+  { slot: 'data_nf', labels: ['Data NF'], target: 'data_nf', required: true },
+  { slot: 'dle', labels: ['D.L.E.'], target: 'dle', required: true },
+  { slot: 'agendam', labels: ['Agendam.'], target: 'agendam', required: true },
+  { slot: 'conf', labels: ['Conf'], target: 'conf', required: true },
+  { slot: 'peso', labels: ['Peso'], target: 'peso', required: true },
+  { slot: 'valor_merc', labels: ['Vlr.Merc.'], target: 'vlr_merc', required: true },
+  { slot: 'qtd', labels: ['Qtd.'], target: 'qtd', required: true },
+  { slot: 'peso_cub', labels: ['Peso Cub.'], target: 'peso_cubico', required: true },
+  { slot: 'classificacao', labels: ['Classificação', 'Classificacao'], target: 'classif', required: true },
+  { slot: 'tomador', labels: ['Tomador'], target: 'tomad', required: true },
+  { slot: 'destinatario', labels: ['Destinatário', 'Destinatario'], target: 'destin', required: true },
+  { slot: 'bairro', labels: ['Bairro'], target: 'bairro', required: true },
+  { slot: 'cidade', labels: ['Cidade'], target: 'cidade', required: true },
+  { slot: 'uf', labels: ['UF'], target: 'uf', required: true },
+  { slot: 'nf_s', labels: ['NF/S'], target: 'nf_serie', required: true },
+  { slot: 'tipo_carga_1', labels: ['Tipo Carga'], target: 'tipo_carga', required: true },
+  { slot: 'qtd_nf', labels: ['Qtd.NF'], target: 'qtd_nf', required: true },
+  { slot: 'mesoregiao', labels: ['Mesoregião', 'Mesoregiao'], target: 'mesoregiao', required: true },
+  { slot: 'sub_regiao', labels: ['Sub-Região', 'Sub-Regiao'], target: 'sub_regiao', required: true },
+  { slot: 'ocorrencias', labels: ['Ocorrências', 'Ocorrencias'], target: 'ocorrencias_nf', required: true },
+  { slot: 'remetente', labels: ['Remetente'], target: 'remetente', required: true },
+  { slot: 'observacao', labels: ['Observação', 'Observacao'], target: 'observacao', required: true },
+  { slot: 'ref_cliente', labels: ['Ref Cliente'], target: 'ref_cliente', required: true },
+  { slot: 'cidade_dest', labels: ['Cidade Dest.'], target: 'cidade_dest', required: true },
+  { slot: 'agenda', labels: ['Agenda'], target: 'agenda', required: true },
+  { slot: 'tipo_carga_2', labels: ['Tipo Carga'], target: 'tipo_ca', required: true },
+  { slot: 'ultima_ocorrencia', labels: ['Ultima Ocorrencia', 'Última Ocorrência'], target: 'ultima_ocorrencia', required: true },
+  { slot: 'latitude', labels: ['Latitude'], target: 'latitude', required: true },
+  { slot: 'longitude', labels: ['Longitude'], target: 'longitude', required: true },
+  { slot: 'peso_calculo', labels: ['Peso Calculo'], target: 'peso_calculo', required: true },
+  { slot: 'prioridade', labels: ['Prioridade'], target: 'prioridade', required: true },
+  { slot: 'restricao_veiculo', labels: ['Restrição Veiculo', 'Restrição Veículo'], target: 'restricao_veiculo', required: true },
+  { slot: 'carro_dedicado', labels: ['Carro Dedicado'], target: 'carro_dedicado', required: true },
+  { slot: 'restricao_horario', labels: ['Restrição Horario', 'Restrição Horário'], ignore: true, required: true },
+  { slot: 'redespacho', labels: ['Redespacho'], target: 'redespacho_codigo', required: true },
+]
 
 const CAMPOS_NUMERICOS = new Set([
   'peso',
@@ -130,7 +88,9 @@ export const normalizeForComparison = (value: unknown): string => String(value ?
   .trim()
   .toLowerCase()
 
-const removePlaceholderHeaders = (row: unknown[]): unknown[] => row.filter((cell) => !isPlaceholderHeader(cell))
+const getValidHeaderCells = (row: unknown[]) => row
+  .map((cell, index) => ({ cell, index }))
+  .filter(({ cell }) => !isPlaceholderHeader(cell))
 
 const isRowFullyEmpty = (row: Record<string, unknown>): boolean =>
   Object.values(row).every((value) => {
@@ -199,14 +159,14 @@ const normalizarCodigoRedespacho = (value: unknown): string | null => {
 }
 
 export function detectHeaderRow(rows: unknown[][]): number {
-  const expected = DATASET_COLUNAS_BRUTAS.map(normalizeForComparison)
+  const expected = DATASET_LAYOUT_DEFINITIVO.map((col) => normalizeForComparison(col.labels[0]))
   let bestIndex = -1
   let bestScore = 0
 
   const maxScan = Math.min(rows.length, 80)
 
   for (let rowIndex = 0; rowIndex < maxScan; rowIndex += 1) {
-    const candidate = removePlaceholderHeaders(rows[rowIndex] ?? []).map(normalizeForComparison)
+    const candidate = getValidHeaderCells(rows[rowIndex] ?? []).map(({ cell }) => normalizeForComparison(cell))
     if (candidate.length < expected.length) continue
 
     let cursor = 0
@@ -237,29 +197,23 @@ export function detectHeaderRow(rows: unknown[][]): number {
 }
 
 const validarCabecalho = (headerRow: unknown[]): string[] => {
-  const cleaned = removePlaceholderHeaders(headerRow)
-  const normalized = cleaned.map(normalizeForComparison)
-  const expected = DATASET_COLUNAS_BRUTAS.map(normalizeForComparison)
-
-  if (normalized.length < DATASET_COLUNAS_BRUTAS.length - 1) {
+  const validHeaderCells = getValidHeaderCells(headerRow)
+  if (validHeaderCells.length < DATASET_LAYOUT_DEFINITIVO.length) {
     throw new Error('Cabeçalho inválido: quantidade de colunas menor que o layout esperado.')
   }
 
-  const obrigatorias = DATASET_COLUNAS_BRUTAS.filter((c) => c !== 'Redespacho')
-  const obrigatoriasNorm = obrigatorias.map(normalizeForComparison)
-
-  for (let i = 0; i < obrigatoriasNorm.length; i += 1) {
-    if (normalized[i] !== obrigatoriasNorm[i]) {
-      throw new Error(`Cabeçalho incompatível na coluna ${i + 1}. Esperado "${obrigatorias[i]}".`)
+  for (let i = 0; i < DATASET_LAYOUT_DEFINITIVO.length; i += 1) {
+    const cell = validHeaderCells[i]?.cell
+    const actual = normalizeForComparison(cell)
+    const expectedLabels = DATASET_LAYOUT_DEFINITIVO[i].labels.map(normalizeForComparison)
+    if (!expectedLabels.includes(actual)) {
+      throw new Error(
+        `Cabeçalho incompatível na posição lógica ${i + 1}. Esperado: [${DATASET_LAYOUT_DEFINITIVO[i].labels.join(', ')}]. Encontrado: "${String(cell ?? '')}".`,
+      )
     }
   }
 
-  const redespachoHeader = cleaned[obrigatorias.length]
-  if (redespachoHeader && normalizeForComparison(redespachoHeader) !== 'redespacho') {
-    throw new Error('Cabeçalho inválido para coluna opcional Redespacho.')
-  }
-
-  return cleaned.map((_, i) => String(cleaned[i] ?? DATASET_COLUNAS_BRUTAS[i]))
+  return validHeaderCells.map(({ cell }) => String(cell ?? ''))
 }
 
 
@@ -315,7 +269,9 @@ export const carteiraUploadService = {
     }
 
     const headerRowIndex = detectHeaderRow(rows)
-    const headerRaw = validarCabecalho(rows[headerRowIndex] ?? [])
+    const headerRow = rows[headerRowIndex] ?? []
+    const headerRaw = validarCabecalho(headerRow)
+    const validHeaderCells = getValidHeaderCells(headerRow)
 
     let linhasIgnoradasCabecalhoRedespacho = 0
 
@@ -324,8 +280,9 @@ export const carteiraUploadService = {
       .map((row, index) => {
         const rawObject: Record<string, unknown> = {}
 
-        DATASET_COLUNAS_BRUTAS.forEach((coluna, colIndex) => {
-          rawObject[coluna] = row[colIndex] ?? null
+        DATASET_LAYOUT_DEFINITIVO.forEach((slotDef, slotIndex) => {
+          const cellIndex = validHeaderCells[slotIndex]?.index ?? slotIndex
+          rawObject[slotDef.slot] = row[cellIndex] ?? null
         })
 
         const mapped: Record<string, unknown> = {
@@ -334,9 +291,10 @@ export const carteiraUploadService = {
           dados_originais_json: rawObject,
         }
 
-        DATASET_COLUNAS_BRUTAS.forEach((coluna) => {
-          const target = MAPEAMENTO_FIXO[coluna]
-          const rawValue = rawObject[coluna]
+        DATASET_LAYOUT_DEFINITIVO.forEach((slotDef) => {
+          if (!slotDef.target) return
+          const target = slotDef.target
+          const rawValue = rawObject[slotDef.slot]
 
           if (CAMPOS_NUMERICOS.has(target)) {
             mapped[target] = parseNumeric(rawValue)
@@ -348,7 +306,12 @@ export const carteiraUploadService = {
           }
         })
 
-        const redespachoTexto = normalizarCodigoRedespacho(rawObject.Redespacho)
+        mapped.palet = null
+        mapped.status_r = null
+        mapped.inicio_entrega = null
+        mapped.fim_entrega = null
+
+        const redespachoTexto = normalizarCodigoRedespacho(rawObject.redespacho)
         mapped.redespacho_codigo = redespachoTexto || null
         mapped.redespacho_flag = Boolean(redespachoTexto)
         mapped.redespacho_transportadora_id = null
@@ -359,7 +322,7 @@ export const carteiraUploadService = {
       .filter((row) => {
         const redespachoMapped = normalizeForComparison(row.redespacho_codigo)
         const rawObject = (row.dados_originais_json ?? {}) as Record<string, unknown>
-        const redespachoRaw = normalizeForComparison(rawObject.Redespacho)
+        const redespachoRaw = normalizeForComparison(rawObject.redespacho)
         if (redespachoMapped === 'redespacho' || redespachoRaw === 'redespacho') {
           linhasIgnoradasCabecalhoRedespacho += 1
           return false
@@ -404,7 +367,7 @@ export const carteiraUploadService = {
         total_linhas_importadas: totalLinhasImportadas,
         total_linhas_validas: totalLinhasImportadas,
         total_linhas_invalidas: 0,
-        total_colunas_detectadas: DATASET_COLUNAS_BRUTAS.length,
+        total_colunas_detectadas: DATASET_LAYOUT_DEFINITIVO.length,
         linha_cabecalho_detectada: headerRowIndex + 1,
         colunas_detectadas_json: headerRaw,
         metadados_json: {
@@ -451,9 +414,9 @@ export const carteiraUploadService = {
       uploadId,
       nomeArquivo: file.name,
       totalLinhas: totalLinhasImportadas,
-      totalColunas: DATASET_COLUNAS_BRUTAS.length,
+      totalColunas: DATASET_LAYOUT_DEFINITIVO.length,
       linhaCabecalho: headerRowIndex + 1,
-      colunasDetectadas: [...DATASET_COLUNAS_BRUTAS],
+      colunasDetectadas: DATASET_LAYOUT_DEFINITIVO.map((slot) => slot.labels[0]),
       preview,
     }
   },
@@ -539,7 +502,7 @@ export const carteiraUploadService = {
     }
   },
 
-  expectedRawColumns: DATASET_COLUNAS_BRUTAS,
+  expectedRawColumns: DATASET_LAYOUT_DEFINITIVO.map((slot) => slot.labels[0]),
 }
 
 export type CarteiraImportada = CarteiraCarga
