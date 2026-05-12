@@ -198,6 +198,24 @@ const mapVeiculoToMotor = (veiculo: Record<string, unknown>) => ({
   ativo: veiculo.ativo === true,
 })
 
+const normalizeCarroDedicadoPayload = (value: unknown): boolean | null => {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+
+  const normalized = normalizeForComparison(value)
+  if (!normalized) return null
+
+  if (['carro dedicado', 'carro dedicado exclusivo', 'sim', 's', 'true', '1', 'yes', 'y'].includes(normalized)) {
+    return true
+  }
+
+  if (['-', '—', 'nao', 'não', 'n', 'false', '0', 'no', 'null', 'nan', 'undefined'].includes(normalized)) {
+    return false
+  }
+
+  return null
+}
+
 const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): CarteiraCargaContratoMotor => {
   const agendamOriginal = item.agendam
   const dleOriginal = item.dle
@@ -287,7 +305,7 @@ const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): Car
   'Peso Calculo': pesoCalculo,
   Prioridade: item.prioridade,
   'Restrição Veículo': item.restricao_veiculo,
-  'Carro Dedicado': item.carro_dedicado,
+  'Carro Dedicado': normalizeCarroDedicadoPayload(item.carro_dedicado),
   'Inicio Ent.': inicioEntregaNormalizado,
   'Fim En': fimEnNormalizado,
   carteira_item_id: item._carteira_item_id ?? null,
@@ -741,6 +759,11 @@ export const roteirizacaoService = {
       rodada_origem_id: rodadaOrigemId,
       repescagem_numero: repescagemNumero,
     }
+    console.log('[REPESCAGEM CARRO DEDICADO DIAG]', carteiraValidaRepescagem.slice(0, 20).map((item) => ({
+      nro_doc: item['Nro Doc.'],
+      carro_dedicado: item['Carro Dedicado'],
+      tipo: typeof item['Carro Dedicado'],
+    })))
     const { error: rodadaFilhaError } = await supabase.from('rodadas_roteirizacao').insert({
       id: rodadaFilhaId, tipo_execucao: 'repescagem_remanescentes', rodada_origem_id: rodadaOrigemId, repescagem_numero: repescagemNumero,
       upload_id: rodadaOrigem.upload_id, filial_id: rodadaOrigem.filial_id, filial_nome: rodadaOrigem.filial_nome,
@@ -1283,6 +1306,11 @@ export const roteirizacaoService = {
       agendam: item['Agendam.'],
       conf: item['Conf'],
       peso_calculo: item['Peso Calculo'],
+    })))
+    console.log('[PAYLOAD CARRO DEDICADO DIAG]', carteiraContrato.slice(0, 20).map((item) => ({
+      nro_doc: item['Nro Doc.'],
+      carro_dedicado: item['Carro Dedicado'],
+      tipo: typeof item['Carro Dedicado'],
     })))
 
     if (import.meta.env.DEV && carteiraContrato.length > 0) {

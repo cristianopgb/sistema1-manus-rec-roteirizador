@@ -146,10 +146,10 @@ const parseNumeric = (value: unknown): number | null => {
 
 const parseBoolean = (value: unknown): boolean | null => {
   if (value === null || value === undefined) return null
-  const text = String(value).trim().toLowerCase()
-  if (!text) return null
-  if (['sim', 's', 'true', '1', 'yes', 'y'].includes(text)) return true
-  if (['nao', 'não', 'n', 'false', '0', 'no'].includes(text)) return false
+  const normalized = normalizeForComparison(value)
+  if (!normalized) return null
+  if (['carro dedicado', 'carro dedicado exclusivo', 'sim', 's', 'true', '1', 'yes', 'y'].includes(normalized)) return true
+  if (['-', '—', 'nao', 'não', 'n', 'false', '0', 'no', 'null', 'nan', 'undefined'].includes(normalized)) return false
   return null
 }
 
