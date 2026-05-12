@@ -89,6 +89,27 @@ export const normalizeForComparison = (value: unknown): string => String(value ?
   .trim()
   .toLowerCase()
 
+export type TipoCarroDedicado = 'normal' | 'exclusivo' | null
+
+export const normalizarTipoCarroDedicado = (value: unknown): TipoCarroDedicado => {
+  const normalized = normalizeForComparison(value)
+  if (!normalized) return null
+  if (['-', '—', 'null', 'nan', 'undefined', 'na', 'n/a'].includes(normalized)) return null
+  if (normalized === 'carro dedicado exclusivo') return 'exclusivo'
+  if (normalized === 'carro dedicado') return 'normal'
+  if (['sim', 's', 'true', '1', 'yes', 'y'].includes(normalized)) return 'normal'
+  return null
+}
+
+export const normalizarCarroDedicadoBoolean = (value: unknown): boolean | null => {
+  const tipo = normalizarTipoCarroDedicado(value)
+  if (tipo) return true
+  const normalized = normalizeForComparison(value)
+  if (!normalized) return null
+  if (['-', '—', 'null', 'nan', 'undefined', 'nao', 'não', 'n', 'false', '0', 'no'].includes(normalized)) return false
+  return null
+}
+
 const getValidHeaderCells = (row: unknown[]) => row
   .map((cell, index) => ({ cell, index }))
   .filter(({ cell }) => !isPlaceholderHeader(cell))
@@ -145,12 +166,7 @@ const parseNumeric = (value: unknown): number | null => {
 }
 
 const parseBoolean = (value: unknown): boolean | null => {
-  if (value === null || value === undefined) return null
-  const normalized = normalizeForComparison(value)
-  if (!normalized) return null
-  if (['carro dedicado', 'carro dedicado exclusivo', 'sim', 's', 'true', '1', 'yes', 'y'].includes(normalized)) return true
-  if (['-', '—', 'nao', 'não', 'n', 'false', '0', 'no', 'null', 'nan', 'undefined'].includes(normalized)) return false
-  return null
+  return normalizarCarroDedicadoBoolean(value)
 }
 
 const REDESPACHO_PLACEHOLDERS = new Set([

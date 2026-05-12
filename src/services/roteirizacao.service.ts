@@ -14,7 +14,7 @@ import {
   RotaManifestoGoogle, RotaManifestoParadaGoogle
 } from '@/types'
 import { normalizeHorarioJanela } from '@/lib/time-normalizers'
-import { isCodigoRedespachoValido, normalizeForComparison } from './carteira-upload.service'
+import { isCodigoRedespachoValido, normalizarCarroDedicadoBoolean, normalizarTipoCarroDedicado, normalizeForComparison } from './carteira-upload.service'
 import {
   normalizeAgendam,
   normalizeDataDesDataNF,
@@ -198,24 +198,6 @@ const mapVeiculoToMotor = (veiculo: Record<string, unknown>) => ({
   ativo: veiculo.ativo === true,
 })
 
-const normalizeCarroDedicadoPayload = (value: unknown): boolean | null => {
-  if (typeof value === 'boolean') return value
-  if (typeof value === 'number') return value !== 0
-
-  const normalized = normalizeForComparison(value)
-  if (!normalized) return null
-
-  if (['carro dedicado', 'carro dedicado exclusivo', 'sim', 's', 'true', '1', 'yes', 'y'].includes(normalized)) {
-    return true
-  }
-
-  if (['-', '—', 'nao', 'não', 'n', 'false', '0', 'no', 'null', 'nan', 'undefined'].includes(normalized)) {
-    return false
-  }
-
-  return null
-}
-
 const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): CarteiraCargaContratoMotor => {
   const agendamOriginal = item.agendam
   const dleOriginal = item.dle
@@ -232,6 +214,15 @@ const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): Car
   const pesoCubico = toPayloadNumber(item.peso_cubico)
   const latitude = toPayloadNumber(item.latitude)
   const longitude = toPayloadNumber(item.longitude)
+  const dadosOriginais = (
+    item._dados_originais
+    ?? item.dados_originais_json
+    ?? {}
+  ) as Record<string, unknown>
+  const valorOriginalCarroDedicado = dadosOriginais.carro_dedicado ?? dadosOriginais['Carro Dedicado'] ?? item.carro_dedicado
+  let tipoCarroDedicado = normalizarTipoCarroDedicado(valorOriginalCarroDedicado)
+  if (!tipoCarroDedicado && item.carro_dedicado === true) tipoCarroDedicado = 'normal'
+  const flagCarroDedicado = tipoCarroDedicado ? true : normalizarCarroDedicadoBoolean(item.carro_dedicado)
   if (import.meta.env.DEV) {
     console.log('[PAYLOAD] Inicio Ent. original:', item.inicio_entrega)
     console.log('[PAYLOAD] Inicio Ent. normalizado:', inicioEntregaNormalizado)
@@ -305,7 +296,8 @@ const mapCarteiraItemToMotorContract = (item: CarteiraCarga, index: number): Car
   'Peso Calculo': pesoCalculo,
   Prioridade: item.prioridade,
   'Restrição Veículo': item.restricao_veiculo,
-  'Carro Dedicado': normalizeCarroDedicadoPayload(item.carro_dedicado),
+  'Carro Dedicado': flagCarroDedicado,
+  carro_dedicado_tipo: tipoCarroDedicado,
   'Inicio Ent.': inicioEntregaNormalizado,
   'Fim En': fimEnNormalizado,
   carteira_item_id: item._carteira_item_id ?? null,
@@ -762,7 +754,8 @@ export const roteirizacaoService = {
     console.log('[REPESCAGEM CARRO DEDICADO DIAG]', carteiraValidaRepescagem.slice(0, 20).map((item) => ({
       nro_doc: item['Nro Doc.'],
       carro_dedicado: item['Carro Dedicado'],
-      tipo: typeof item['Carro Dedicado'],
+      carro_dedicado_tipo: item.carro_dedicado_tipo ?? null,
+      tipo_valor: typeof item['Carro Dedicado'],
     })))
     const { error: rodadaFilhaError } = await supabase.from('rodadas_roteirizacao').insert({
       id: rodadaFilhaId, tipo_execucao: 'repescagem_remanescentes', rodada_origem_id: rodadaOrigemId, repescagem_numero: repescagemNumero,
@@ -1310,7 +1303,8 @@ export const roteirizacaoService = {
     console.log('[PAYLOAD CARRO DEDICADO DIAG]', carteiraContrato.slice(0, 20).map((item) => ({
       nro_doc: item['Nro Doc.'],
       carro_dedicado: item['Carro Dedicado'],
-      tipo: typeof item['Carro Dedicado'],
+      carro_dedicado_tipo: item.carro_dedicado_tipo ?? null,
+      tipo_valor: typeof item['Carro Dedicado'],
     })))
 
     if (import.meta.env.DEV && carteiraContrato.length > 0) {

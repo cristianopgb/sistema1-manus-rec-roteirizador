@@ -251,6 +251,7 @@ export interface CarteiraCargaContratoMotor {
   Prioridade: unknown
   'Restrição Veículo': unknown
   'Carro Dedicado': unknown
+  carro_dedicado_tipo?: 'normal' | 'exclusivo' | null
   'Inicio Ent.': unknown
   'Fim En': unknown
   redespacho_flag?: boolean
