@@ -8,7 +8,7 @@ import {
 } from '@/config/motor2'
 import {
   PayloadMotor, RespostaMotor, ManifestoComFrete,
-  RodadaRoteirizacao, FiltrosRoteirizacao, CarteiraCarga,
+  RodadaRoteirizacao, RodadaRoteirizacaoResumo, FiltrosRoteirizacao, CarteiraCarga,
   Filial, FiltrosCarteira, ConfiguracaoFrotaItem, CarteiraCargaContratoMotor,
   ManifestoRoteirizacaoDetalhe, ManifestoItemRoteirizacao, RemanescenteRoteirizacao, EstatisticasRoteirizacao,
   RotaManifestoGoogle, RotaManifestoParadaGoogle
@@ -1635,10 +1635,10 @@ export const roteirizacaoService = {
     return { rodada, manifestos: manifestosComFrete }
   },
 
-  async listarRodadas(filialId?: string): Promise<RodadaRoteirizacao[]> {
+  async listarRodadas(filialId?: string): Promise<RodadaRoteirizacaoResumo[]> {
     let query = supabase
       .from('rodadas_roteirizacao')
-      .select('id, usuario_id, filial_id, upload_id, status, mensagem_retorno, created_at, updated_at, filiais:filial_id(nome)')
+      .select('id, usuario_id, filial_id, upload_id, status, mensagem_retorno, created_at, updated_at')
       .order('created_at', { ascending: false })
       .limit(100)
 
@@ -1647,18 +1647,7 @@ export const roteirizacaoService = {
     const { data, error } = await query
     if (error) throw error
 
-    return (data || []).map((r) => ({
-      ...r,
-      filial_nome: Array.isArray(r.filiais) ? r.filiais[0]?.nome : (r.filiais as { nome: string } | null)?.nome,
-      tipo_roteirizacao: 'carteira',
-      total_cargas_entrada: 0,
-      total_manifestos: 0,
-      total_itens_manifestados: 0,
-      total_nao_roteirizados: 0,
-      km_total_frota: 0,
-      ocupacao_media_percentual: 0,
-      tempo_processamento_ms: 0,
-    })) as RodadaRoteirizacao[]
+    return (data || []) as RodadaRoteirizacaoResumo[]
   },
 
   async buscarRodada(id: string): Promise<RodadaRoteirizacao> {

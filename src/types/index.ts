@@ -114,6 +114,27 @@ export interface RodadaRoteirizacao {
   aprovada_por?: string
 }
 
+export interface RodadaRoteirizacaoResumo {
+  id: string
+  usuario_id: string
+  filial_id: string
+  filial_nome?: string
+  upload_id?: string | null
+  status: StatusRodada
+  mensagem_retorno?: string | null
+  usuario_nome?: string
+  tipo_roteirizacao?: TipoRoteirizacao
+  created_at: string
+  updated_at?: string | null
+  total_cargas_entrada?: number
+  total_manifestos?: number
+  total_itens_manifestados?: number
+  total_nao_roteirizados?: number
+  km_total_frota?: number
+  ocupacao_media_percentual?: number
+  tempo_processamento_ms?: number
+}
+
 // --- Tipos de Roteirização ---
 export type TipoRoteirizacao = 'carteira' | 'frota'
 

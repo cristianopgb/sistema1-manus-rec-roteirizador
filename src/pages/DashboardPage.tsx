@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { roteirizacaoService } from '@/services/roteirizacao.service'
-import { RodadaRoteirizacao } from '@/types'
+import { RodadaRoteirizacaoResumo } from '@/types'
 import toast from 'react-hot-toast'
 
 interface KpiCard {
@@ -20,7 +20,7 @@ interface KpiCard {
 
 export function DashboardPage() {
   const { user, filialAtiva, isMaster } = useAuth()
-  const [rodadas, setRodadas] = useState<RodadaRoteirizacao[]>([])
+  const [rodadas, setRodadas] = useState<RodadaRoteirizacaoResumo[]>([])
   const [loading, setLoading] = useState(true)
   const [periodo, setPeriodo] = useState<'7d' | '30d' | '90d'>('30d')
 
@@ -286,7 +286,7 @@ export function DashboardPage() {
                           {r.total_nao_roteirizados?.toLocaleString('pt-BR')}
                         </td>
                         <td className="text-right font-mono text-sm">
-                          {((r.total_manifestos || 0) > 0 ? (r.km_total_frota || 0) / r.total_manifestos : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km
+                          {((r.total_manifestos || 0) > 0 ? (r.km_total_frota || 0) / (r.total_manifestos || 1) : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km
                         </td>
                         <td className="text-right">
                           <span className={`font-semibold ${

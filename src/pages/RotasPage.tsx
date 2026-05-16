@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { roteirizacaoService } from '@/services/roteirizacao.service'
-import { ManifestoItemRoteirizacao, ManifestoRoteirizacaoDetalhe, RodadaRoteirizacao, RotaManifestoGoogle, RotaManifestoParadaGoogle } from '@/types'
+import { ManifestoItemRoteirizacao, ManifestoRoteirizacaoDetalhe, RodadaRoteirizacaoResumo, RotaManifestoGoogle, RotaManifestoParadaGoogle } from '@/types'
 import { supabase } from '@/lib/supabase'
 import { RotaMapa } from '@/components/rotas/RotaMapa'
 
@@ -15,7 +15,7 @@ const formatarDuracao = (segundos?: number | null): string => {
 
 export function RotasPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [rodadas, setRodadas] = useState<RodadaRoteirizacao[]>([])
+  const [rodadas, setRodadas] = useState<RodadaRoteirizacaoResumo[]>([])
   const [manifestos, setManifestos] = useState<ManifestoRoteirizacaoDetalhe[]>([])
   const [rota, setRota] = useState<RotaManifestoGoogle | null>(null)
   const [loading, setLoading] = useState(false)
