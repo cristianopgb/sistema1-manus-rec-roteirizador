@@ -394,7 +394,7 @@ export function HistoricoPage() {
       setLoading(true)
       let query = supabase
         .from('rodadas_roteirizacao')
-        .select('id, usuario_id, filial_id, upload_id, status, mensagem_retorno, created_at, updated_at')
+        .select('id, usuario_id, filial_id, upload_id, status, mensagem_retorno:erro_mensagem, created_at, updated_at')
         .order('created_at', { ascending: false })
         .limit(100)
 
