@@ -394,7 +394,7 @@ export function HistoricoPage() {
       setLoading(true)
       let query = supabase
         .from('rodadas_roteirizacao')
-        .select('id, status, created_at, usuario_id, usuario_nome, filial_id, filial_nome, upload_id, tipo_roteirizacao, total_cargas_entrada, total_manifestos, total_itens_manifestados, total_nao_roteirizados, km_total_frota, ocupacao_media_percentual, tempo_processamento_ms, erro_mensagem, data_base_roteirizacao')
+        .select('id, usuario_id, filial_id, upload_id, status, mensagem_retorno, created_at, updated_at')
         .order('created_at', { ascending: false })
         .limit(100)
 
@@ -404,7 +404,17 @@ export function HistoricoPage() {
 
       const { data, error } = await query
       if (!error && data) {
-        const rows = data as RodadaRoteirizacao[]
+        const rows = (data || []).map((r) => ({
+          ...r,
+          tipo_roteirizacao: 'carteira',
+          total_cargas_entrada: 0,
+          total_manifestos: 0,
+          total_itens_manifestados: 0,
+          total_nao_roteirizados: 0,
+          km_total_frota: 0,
+          ocupacao_media_percentual: 0,
+          tempo_processamento_ms: 0,
+        })) as RodadaRoteirizacao[]
         setRodadas(rows)
         if (rodadaEmFoco) {
           const foco = rows.find((r) => r.id === rodadaEmFoco)
