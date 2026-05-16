@@ -1638,7 +1638,7 @@ export const roteirizacaoService = {
   async listarRodadas(filialId?: string): Promise<RodadaRoteirizacao[]> {
     let query = supabase
       .from('rodadas_roteirizacao')
-      .select('*, filiais:filial_id(nome)')
+      .select('id, status, created_at, usuario_id, usuario_nome, filial_id, upload_id, tipo_roteirizacao, total_cargas_entrada, total_manifestos, total_itens_manifestados, total_nao_roteirizados, km_total_frota, ocupacao_media_percentual, tempo_processamento_ms, erro_mensagem, data_base_roteirizacao, filiais:filial_id(nome)')
       .order('created_at', { ascending: false })
       .limit(100)
 
