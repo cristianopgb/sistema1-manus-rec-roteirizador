@@ -663,7 +663,7 @@ export const roteirizacaoService = {
     console.log(`[REPESCAGEM] inicio rodada_origem_id=${rodadaOrigemId}`)
     const { data: rodadaOrigem, error: rodadaError } = await supabase
       .from('rodadas_roteirizacao')
-      .select('id, upload_id, filial_id, filial_nome, usuario_id, usuario_nome, tipo_roteirizacao, data_base_roteirizacao, payload_enviado, tipo_execucao, created_at')
+      .select('id, usuario_id, filial_id, upload_id, status, payload_enviado, mensagem_retorno, created_at, updated_at, filiais:filial_id(nome)')
       .eq('id', rodadaOrigemId)
       .single()
     if (rodadaError || !rodadaOrigem) throw new Error('Rodada de origem não encontrada para repescagem.')
